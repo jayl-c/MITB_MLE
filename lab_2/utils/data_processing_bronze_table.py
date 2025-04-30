@@ -26,7 +26,7 @@ def process_bronze_table(snapshot_date_str, bronze_lms_directory, spark):
     df = spark.read.csv(csv_file_path, header=True, inferSchema=True).filter(col('snapshot_date') == snapshot_date)
     print(snapshot_date_str + 'row count:', df.count())
 
-    # save bronze table to datamart - IRL connect to database to write
+    # save bronze table to datamart - IRL connect to database to write, partition by date
     partition_name = "bronze_loan_daily_" + snapshot_date_str.replace('-','_') + '.csv'
     filepath = bronze_lms_directory + partition_name
     df.toPandas().to_csv(filepath, index=False)

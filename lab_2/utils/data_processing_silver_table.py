@@ -44,7 +44,7 @@ def process_silver_table(snapshot_date_str, bronze_lms_directory, silver_loan_da
     for column, new_type in column_type_map.items():
         df = df.withColumn(column, col(column).cast(new_type))
 
-    # augment data: add month on book
+    # augment data: add month on book, form of feature extraction/engineering
     df = df.withColumn("mob", col("installment_num").cast(IntegerType()))
 
     # augment data: add days past due
@@ -52,7 +52,7 @@ def process_silver_table(snapshot_date_str, bronze_lms_directory, silver_loan_da
     df = df.withColumn("first_missed_date", F.when(col("installments_missed") > 0, F.add_months(col("snapshot_date"), -1 * col("installments_missed"))).cast(DateType()))
     df = df.withColumn("dpd", F.when(col("overdue_amt") > 0.0, F.datediff(col("snapshot_date"), col("first_missed_date"))).otherwise(0).cast(IntegerType()))
 
-    # save silver table - IRL connect to database to write
+    # save silver table - IRL connect to database to write, save as parquet file -> more optimised (faster)
     partition_name = "silver_loan_daily_" + snapshot_date_str.replace('-','_') + '.parquet'
     filepath = silver_loan_daily_directory + partition_name
     df.write.mode("overwrite").parquet(filepath)
