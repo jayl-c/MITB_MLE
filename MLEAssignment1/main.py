@@ -16,7 +16,7 @@ from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 import utils.data_processing_bronze_table
 import utils.data_processing_silver_table
 import utils.data_processing_gold_table
-
+import utils.data_processing_features
 
 # Initialize SparkSession
 spark = pyspark.sql.SparkSession.builder \
@@ -71,7 +71,7 @@ for date_str in dates_str_lst:
     utils.data_processing_bronze_table.process_bronze_table(date_str, bronze_lms_directory, spark)
 
 
-# create bronze datalake
+# create silver datalake
 silver_loan_daily_directory = "datamart/silver/loan_daily/"
 
 if not os.path.exists(silver_loan_daily_directory):
@@ -81,6 +81,16 @@ if not os.path.exists(silver_loan_daily_directory):
 for date_str in dates_str_lst:
     utils.data_processing_silver_table.process_silver_table(date_str, bronze_lms_directory, silver_loan_daily_directory, spark)
 
+# create datalake for features
+raw_feature_financials = "data/features_financials.csv"
+raw_feature_attributes = "data/features_attributes.csv"
+raw_clickstream = "data/feature_clickstream.csv"
+silver_feature_directory = "datamart/silver/feature_store/"
+
+if not os.path.exists(silver_feature_directory):
+    os.makedirs(silver_feature_directory)
+
+utils.data_processing_features.process_customer_features(raw_feature_financials,raw_feature_attributes, raw_clickstream, silver_feature_directory, spark)
 
 # create bronze datalake
 gold_label_store_directory = "datamart/gold/label_store/"
