@@ -14,10 +14,10 @@ import math
 
 from pyspark.sql.functions import col, round, expr, count, mean, min, max, stddev, skewness, kurtosis, percentile_approx, lit, split, explode, trim, regexp_replace, transform, array_contains, when, regexp_extract, coalesce, isnull
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
-
 from pyspark.sql.functions import col, regexp_replace
-
 from utils.data_processing_attributes import process_customer_attributes
+import utils.generator_fn as fn
+
 
 spark = pyspark.sql.SparkSession.builder \
     .appName("dev") \
@@ -27,11 +27,17 @@ spark = pyspark.sql.SparkSession.builder \
 # Set log level to ERROR to hide warnings
 spark.sparkContext.setLogLevel("ERROR")
 
-def process_customer_features(raw_feature_financials, raw_feature_attributes, raw_clickstream, silver_feature_directory, spark):
+def process_customer_features(snapshot_date_str, bronze_feature_directory, silver_feature_directory, spark):
+    # prepare arguments
+    snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
     
     # connect to financials table
-    financials_df = spark.read.csv(raw_feature_financials, header=True, inferSchema=True)
-    print('loaded from:', financials_df, 'row count:', financials_df.count())
+    financials_partition_name = "bronze_financials_" + snapshot_date_str.replace('-','_') + '.csv'
+    financials_filepath = bronze_feature_directory + "financials/" + financials_partition_name
+
+    financials_df = spark.read.csv(financials_filepath, header=True, inferSchema=True)
+    print('loaded data before:', snapshot_date)
+    print('row count:', financials_df.count())
 
     # Format numerical columns to remove non-numeric characters
     df1 = financials_df.withColumn("Annual_Income", regexp_replace(F.col("Annual_Income"), "[^0-9\\.]", "")) \
@@ -70,7 +76,6 @@ def process_customer_features(raw_feature_financials, raw_feature_attributes, ra
 
     # Remove extreme outlier (3 Stdev) and recheck stats
     percentile_997_mb = df5.approxQuantile("Monthly_Balance", [0.997], 0.01)[0]
-    print(f"99.7th Percentile of Monthly_Balance: {percentile_997_mb}")
 
     df6 = df5.filter(F.col("Monthly_Balance") < percentile_997_mb)
 
@@ -84,7 +89,6 @@ def process_customer_features(raw_feature_financials, raw_feature_attributes, ra
     percentile_95_loan = df7.approxQuantile("Num_of_Loan", [0.95], 0.01)[0]  
     percentile_95_dp = df7.approxQuantile("Num_of_Delayed_Payment", [0.95], 0.01)[0]  
     percentile_95_ci = df7.approxQuantile("Num_Credit_Inquiries", [0.95], 0.01)[0]  
-
 
     df8 = df7.withColumn("Num_Bank_Accounts", F.when(F.col("Num_Bank_Accounts") > percentile_95_acc, percentile_95_acc).otherwise(F.col("Num_Bank_Accounts"))) \
         .withColumn("Num_Credit_Card", F.when(F.col("Num_Credit_Card") > percentile_95_cc, percentile_95_cc).otherwise(F.col("Num_Credit_Card"))) \
@@ -124,24 +128,18 @@ def process_customer_features(raw_feature_financials, raw_feature_attributes, ra
     loan_types = df9.select(explode("loan_types_array").alias("loan_type")).distinct().collect()
     unique_loan_types = [row['loan_type'] for row in loan_types]
 
-    # One-hot encode (fixed variable name and column naming)
+    # One-hot encode loan types
     for loan_type in unique_loan_types:
         safe_column_name = loan_type.replace(" ", "_").replace("-", "_").lower()
         df9 = df9.withColumn(f"loan_type_{safe_column_name}", 
                             F.array_contains("loan_types_array", loan_type).cast("int"))
+    
+    df9 = df9.drop("loan_type_no_loan")
 
-    # View the result
-    df9.show()
-
-    df10 = df9.withColumn("Credit_Mix", 
-                      F.when(F.col("Credit_Mix") == "Bad", 1)
-                       .when(F.col("Credit_Mix") == "Standard", 2)
-                       .when(F.col("Credit_Mix") == "Good", 3)
-                       .otherwise(0)) \
-          .withColumn("Payment_of_Min_Amount",
-                      F.when(F.col("Payment_of_Min_Amount") == "No", 0)
-                      .when(F.col("Payment_of_Min_Amount") == "Yes", 1)
-                      .otherwise(-1))
+    # One hot encode categorical variables
+    df10 = df9.withColumn("Credit_Mix", F.when(F.col("Credit_Mix") == "_", "Invalid").otherwise(F.col("Credit_Mix"))) 
+    df10 = fn.one_hot_encode_categorical(df10, "Credit_Mix")
+    df10 = fn.one_hot_encode_categorical(df10, "Payment_of_Min_Amount")
 
     # Extract spending level
     df11 = df10.withColumn("Spending_Level", 
@@ -154,23 +152,48 @@ def process_customer_features(raw_feature_financials, raw_feature_attributes, ra
                         .when(F.col("Payment_Behaviour").contains("Large"), 3)
                         .otherwise(0))
    
-    new_financials_df = df11.drop("Monthly_Inhand_Salary", "Type_of_Loan", "Payment_Behaviour", "loan_types_array")
+    new_financials_df = df11.drop("Monthly_Inhand_Salary", "Type_of_Loan", "Payment_Behaviour", "loan_types_array", "payment_of_min_amount", "payment_of_min_amount_no", "credit_mix")
 
+    print('Processing financials data complete')
+    print('Financials data row count:', new_financials_df.count())
+
+    print('\n \n Begin to process attributes data')
     # connect to attributes table
-    processed_attributes = process_customer_attributes(raw_feature_attributes, spark)
+    attributes_partition_name = "bronze_attributes_" + snapshot_date_str.replace('-','_') + '.csv'
+    attributes_filepath = bronze_feature_directory + "attributes/" + attributes_partition_name
+
+    processed_attributes = process_customer_attributes(attributes_filepath, spark)
+    print('Processing attributes data complete')
+    print('Attributes data row count:', processed_attributes.count())
+
+    # Join financials and attributes data
+    print('Merging financials and attributes data complete')
     features_df = new_financials_df.join(processed_attributes, on=["Customer_ID","snapshot_date"], how="inner")
-    features_df = features_df.withColumnRenamed("snapshot_date", "old_snapshot_date")
+    print('Merge complete. features_df row count:', features_df.count())
+
+    cs_partition_name = "bronze_clickstream_" + snapshot_date_str.replace('-','_') + '.csv'
+    cs_filepath = bronze_feature_directory + "clickstream/" + cs_partition_name
     
-    cs_df = spark.read.csv(raw_clickstream, header=True, inferSchema=True)
+    cs_df = spark.read.csv(cs_filepath, header=True, inferSchema=True)
+    print('processing clickstream data starting....')
+    
+    fe_count = [num for num in range(1,21)]
+    column_type_map = {
+        f'fe_{num}': FloatType() for num in fe_count
+    }
+    for column, new_type in column_type_map.items():
+        cs_df = cs_df.withColumn(column, col(column).cast(new_type))
+    print("clickstream processing complete")
     print("clickstream row_count:",cs_df.count())
 
-    cs_df = features_df.join(cs_df, on="Customer_ID", how="inner")
-    cs_df = cs_df.withColumn("snapshot_age", F.col("Age") + (F.year(F.col("snapshot_date")) - F.year(F.col("old_snapshot_date"))))
-    drop_cols = ["old_snapshot_date", "Age"]   
-    final_features_df = cs_df.drop(*drop_cols)
+    # Get data from before snapshot date
+    final_features_df = features_df.join(cs_df, on=["Customer_ID","snapshot_date"], how="inner")
 
-    filepath = silver_feature_directory
+    print('Final features data row count:', final_features_df.count())
+    partition_name = "silver_features_daily_" + snapshot_date_str.replace('-','_') + '.parquet'
+    filepath = silver_feature_directory + partition_name
     final_features_df.write.mode("overwrite").parquet(filepath)
+    print('\n \n Data processing has completed')
     # df.toPandas().to_parquet(filepath,
     #           compression='gzip')
     print('saved to:', filepath)

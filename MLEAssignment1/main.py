@@ -17,6 +17,7 @@ import utils.data_processing_bronze_table
 import utils.data_processing_silver_table
 import utils.data_processing_gold_table
 import utils.data_processing_features
+import utils.generator_fn as fn
 
 # Initialize SparkSession
 spark = pyspark.sql.SparkSession.builder \
@@ -31,34 +32,10 @@ spark.sparkContext.setLogLevel("ERROR")
 snapshot_date_str = "2023-01-01"
 
 start_date_str = "2023-01-01"
-end_date_str = "2024-12-01"
+end_date_str = "2023-02-01"
 
-# generate list of dates to process
-def generate_first_of_month_dates(start_date_str, end_date_str):
-    # Convert the date strings to datetime objects
-    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
-    
-    # List to store the first of month dates
-    first_of_month_dates = []
-
-    # Start from the first of the month of the start_date
-    current_date = datetime(start_date.year, start_date.month, 1)
-
-    while current_date <= end_date:
-        # Append the date in yyyy-mm-dd format
-        first_of_month_dates.append(current_date.strftime("%Y-%m-%d"))
-        
-        # Move to the first of the next month
-        if current_date.month == 12:
-            current_date = datetime(current_date.year + 1, 1, 1)
-        else:
-            current_date = datetime(current_date.year, current_date.month + 1, 1)
-
-    return first_of_month_dates
-
-dates_str_lst = generate_first_of_month_dates(start_date_str, end_date_str)
-print(dates_str_lst)
+dates_str_lst = fn.generate_first_of_month_dates(start_date_str, end_date_str)
+print('generating data from', start_date_str, 'to', end_date_str)
 
 # create bronze datalake
 bronze_lms_directory = "datamart/bronze/lms/"
@@ -70,6 +47,9 @@ if not os.path.exists(bronze_lms_directory):
 for date_str in dates_str_lst:
     utils.data_processing_bronze_table.process_bronze_table(date_str, bronze_lms_directory, spark)
 
+bronze_feature_directory = "datamart/bronze/features/"
+for date_str in dates_str_lst:
+    utils.data_processing_bronze_table.process_bronze_feature_tables(date_str, bronze_feature_directory, spark)
 
 # create silver datalake
 silver_loan_daily_directory = "datamart/silver/loan_daily/"
@@ -82,15 +62,15 @@ for date_str in dates_str_lst:
     utils.data_processing_silver_table.process_silver_table(date_str, bronze_lms_directory, silver_loan_daily_directory, spark)
 
 # create datalake for features
-raw_feature_financials = "data/features_financials.csv"
-raw_feature_attributes = "data/features_attributes.csv"
-raw_clickstream = "data/feature_clickstream.csv"
+
 silver_feature_directory = "datamart/silver/feature_store/"
 
 if not os.path.exists(silver_feature_directory):
     os.makedirs(silver_feature_directory)
 
-utils.data_processing_features.process_customer_features(raw_feature_financials,raw_feature_attributes, raw_clickstream, silver_feature_directory, spark)
+silver_feature_directory = "datamart/silver/feature_store/"
+for date_str in dates_str_lst:
+    utils.data_processing_features.process_customer_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
 
 # create bronze datalake
 gold_label_store_directory = "datamart/gold/label_store/"
@@ -100,11 +80,11 @@ if not os.path.exists(gold_label_store_directory):
 
 # run gold backfill
 for date_str in dates_str_lst:
-    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
+    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 60, mob = 7)
 
 
 folder_path = gold_label_store_directory
-files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
+files_list = glob.glob(os.path.join(folder_path, '*.parquet'))
 df = spark.read.option("header", "true").parquet(*files_list)
 print("row_count:",df.count())
 

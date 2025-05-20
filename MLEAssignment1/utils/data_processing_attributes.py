@@ -14,9 +14,8 @@ import math
 
 from pyspark.sql.functions import col, round, expr, count, mean, min, max, stddev, skewness, kurtosis, percentile_approx, lit, split, explode, trim, regexp_replace, transform, array_contains, when, regexp_extract, coalesce, isnull
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
-
 from pyspark.sql.functions import col, regexp_replace
-
+import utils.generator_fn as fn
 
 spark = pyspark.sql.SparkSession.builder \
     .appName("dev") \
@@ -36,20 +35,13 @@ def process_customer_attributes(raw_feature_attributes, spark):
                              .otherwise(F.col("Occupation"))) \
                              .withColumn("has_SSN", F.when(~F.col("SSN").rlike("[0-9]{3}-[0-9]{2}-[0-9]{4}"), F.lit(0))
                              .otherwise(1)) 
-    unique_occupations = attributes_df.select("Occupation").distinct().collect()
-    unique_occupations = [row['Occupation'] for row in unique_occupations]
+    
+    attributes_df = fn.one_hot_encode_categorical(attributes_df, "Occupation")
 
-    # One-hot encode each occupation
-    for occupation in unique_occupations:
-        # Clean column name
-        safe_column_name = occupation.replace(" ", "_").replace("-", "_").lower()
-        
-        # Create binary column
-        attributes_df = attributes_df.withColumn(f"occupation_{safe_column_name}",
-                                            when(col("Occupation") == occupation, 1).otherwise(0))
+    attributes_df = attributes_df.withColumn("Age", regexp_replace(F.col("Age"), "[^0-9]", ""))
     attributes_df = attributes_df.withColumn("Age", F.col("Age").cast("int"))
-
-    attributes_df = attributes_df.withColumn("Age", F.when((F.col("Age") > 100) | F.col("Age").isNull(), -1)  
+    median_age = attributes_df.approxQuantile("Age", [0.5], 0.01)[0]
+    attributes_df = attributes_df.withColumn("Age", F.when((F.col("Age") > 100) | F.col("Age").isNull(), median_age)  
                                                      .otherwise(F.col("Age")))
     new_attributes_df = attributes_df.drop("Occupation", "SSN", "Name")
 

@@ -33,3 +33,48 @@ def process_bronze_table(snapshot_date_str, bronze_lms_directory, spark):
     print('saved to:', filepath)
 
     return df
+
+def process_bronze_feature_tables(date_str, bronze_base_directory, spark):
+    # Prepare arguments
+    snapshot_date = datetime.strptime(date_str, "%Y-%m-%d")
+    
+    # Source data paths - IRL connect to back end source system
+    data_paths = {
+        'financials': "data/features_financials.csv",
+        'attributes': "data/features_attributes.csv",
+        'clickstream': "data/feature_clickstream.csv"
+    }
+    
+    # Dictionary to store the loaded DataFrames
+    dfs = {}
+    
+    # Process each data type separately
+    for data_type, file_path in data_paths.items():
+        print(f"Processing {data_type} data for {date_str}...")
+        
+        # Create directory if it doesn't exist
+        type_directory = f"{bronze_base_directory}/{data_type}/"
+        os.makedirs(type_directory, exist_ok=True)
+        
+        # Load data - IRL ingest from back end source system
+        df = spark.read.csv(file_path, header=True, inferSchema=True)
+        
+        # Filter by snapshot date if the column exists
+        if 'snapshot_date' in df.columns:
+            df = df.filter(col('snapshot_date') == snapshot_date)
+        
+        # Store the DataFrame
+        dfs[data_type] = df
+        
+        print(f"{data_type} data for {date_str} row count: {df.count()}")
+        
+        # Save bronze table to datamart
+        partition_name = f"bronze_{data_type}_{date_str.replace('-','_')}.csv"
+        filepath = os.path.join(type_directory, partition_name)
+        
+        # Save as CSV
+        df.toPandas().to_csv(filepath, index=False)
+        print(f'Saved {data_type} data to: {filepath}')
+    
+    print(f"All bronze feature tables for {date_str} processed successfully.")
+    return dfs
