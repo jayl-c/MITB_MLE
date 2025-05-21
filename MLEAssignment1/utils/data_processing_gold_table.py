@@ -45,3 +45,38 @@ def process_labels_gold_table(snapshot_date_str, silver_loan_daily_directory, go
     print('saved to:', filepath)
     
     return df
+
+
+def process_features_gold_table(date_str, enddate_str, silver_feature_directory, gold_feature_store_directory, spark):
+    
+    # prepare arguments
+    enddate_str = datetime.strptime(date_str, "%Y-%m-%d")
+    
+    # connect to customer features silver table
+    customer_features_partition_name = "attributes/silver_customer_features_daily_" + date_str.replace('-','_') + '.parquet'
+    custf_filepath = silver_feature_directory + customer_features_partition_name
+    custf_df = spark.read.parquet(custf_filepath)
+    print('loaded from:', custf_filepath, 'row count:', custf_df.count())
+
+    custf_df = custf_df.filter(col("snapshot_date") <= enddate_str)
+    custf_df = custf_df.drop("snapshot_date")
+
+    # connect to clickstream features silver table
+    clickstream_features_partition_name = "clickstream/silver_clickstream_daily_" + date_str.replace('-','_') + '.parquet'
+    cs_filepath = silver_feature_directory + clickstream_features_partition_name
+    cs_df = spark.read.parquet(cs_filepath)
+    cs_df = cs_df.filter(col("snapshot_date") <= enddate_str)
+    cs_df = cs_df.drop("snapshot_date")
+    
+    fstore = custf_df.join(cs_df, on="Customer_ID", how="inner")
+    fstore = fstore.drop("snapshot_date")
+
+    # save feature store
+    gold_partition_name = "gold_feature_store_" + date_str.replace('-','_') + '.parquet'
+    gold_filepath = gold_feature_store_directory + gold_partition_name
+    fstore.write.mode("overwrite").parquet(gold_filepath)
+    # df.toPandas().to_parquet(filepath,
+    #           compression='gzip')
+    print('saved to:', gold_filepath)
+    
+    return fstore

@@ -25,10 +25,17 @@ spark = pyspark.sql.SparkSession.builder \
 # Set log level to ERROR to hide warnings
 spark.sparkContext.setLogLevel("ERROR")
 
-def process_customer_attributes(raw_feature_attributes, spark):
+def process_customer_attributes(attributes_filepath, spark):
     
+    # snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
+    
+    # # connect to financials table
+    # attributes_partition_name = "bronze_financials_" + snapshot_date_str.replace('-','_') + '.csv'
+    # financials_filepath = bronze_feature_directory + "attributes/" + attributes_partition_name
+
+    # financials_df = spark.read.csv(financials_filepath, header=True, inferSchema=True)
     # connect to financials table
-    attributes_df = spark.read.csv(raw_feature_attributes, header=True, inferSchema=True)
+    attributes_df = spark.read.csv(attributes_filepath, header=True, inferSchema=True)
     print('loaded from:', attributes_df, 'row count:', attributes_df.count())
 
     attributes_df = attributes_df.withColumn("Occupation", F.when(~F.col("Occupation").rlike('[a-zA-Z]'), "Others")

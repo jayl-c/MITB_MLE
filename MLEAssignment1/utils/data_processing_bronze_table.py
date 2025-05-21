@@ -53,7 +53,7 @@ def process_bronze_feature_tables(date_str, bronze_base_directory, spark):
         print(f"Processing {data_type} data for {date_str}...")
         
         # Create directory if it doesn't exist
-        type_directory = f"{bronze_base_directory}/{data_type}/"
+        type_directory = f"{bronze_base_directory}/{data_type}"
         os.makedirs(type_directory, exist_ok=True)
         
         # Load data - IRL ingest from back end source system

@@ -62,17 +62,17 @@ for date_str in dates_str_lst:
     utils.data_processing_silver_table.process_silver_table(date_str, bronze_lms_directory, silver_loan_daily_directory, spark)
 
 # create datalake for features
-
-silver_feature_directory = "datamart/silver/feature_store/"
+silver_feature_directory = "datamart/silver/features/"
 
 if not os.path.exists(silver_feature_directory):
     os.makedirs(silver_feature_directory)
 
-silver_feature_directory = "datamart/silver/feature_store/"
 for date_str in dates_str_lst:
     utils.data_processing_features.process_customer_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
+    utils.data_processing_features.process_silver_cs_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
 
-# create bronze datalake
+
+# create gold datalake
 gold_label_store_directory = "datamart/gold/label_store/"
 
 if not os.path.exists(gold_label_store_directory):
@@ -81,6 +81,15 @@ if not os.path.exists(gold_label_store_directory):
 # run gold backfill
 for date_str in dates_str_lst:
     utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 60, mob = 6)
+
+# create gold tables for features
+gold_feature_directory = "datamart/gold/feature_store/"
+
+if not os.path.exists(silver_feature_directory):
+    os.makedirs(silver_feature_directory)
+
+for date_str in dates_str_lst:
+    utils.data_processing_gold_table.process_features_gold_table(date_str, end_date_str, silver_feature_directory, gold_feature_directory, spark)
 
 
 folder_path = gold_label_store_directory
