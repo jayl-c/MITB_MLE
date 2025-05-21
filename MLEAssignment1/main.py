@@ -80,7 +80,7 @@ if not os.path.exists(gold_label_store_directory):
 
 # run gold backfill
 for date_str in dates_str_lst:
-    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 60, mob = 7)
+    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 60, mob = 6)
 
 
 folder_path = gold_label_store_directory

@@ -188,6 +188,8 @@ def process_customer_features(snapshot_date_str, bronze_feature_directory, silve
 
     # Get data from before snapshot date
     final_features_df = features_df.join(cs_df, on=["Customer_ID","snapshot_date"], how="inner")
+    final_features_df = final_features_df.filter(F.col("snapshot_date") <= snapshot_date)
+    final_features_df = final_features_df.drop("Customer_ID", "snapshot_date")
 
     print('Final features data row count:', final_features_df.count())
     partition_name = "silver_features_daily_" + snapshot_date_str.replace('-','_') + '.parquet'
