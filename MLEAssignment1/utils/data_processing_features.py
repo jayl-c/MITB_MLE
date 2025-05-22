@@ -26,13 +26,14 @@ spark = pyspark.sql.SparkSession.builder \
 # Set log level to ERROR to hide warnings
 spark.sparkContext.setLogLevel("ERROR")
 
-def process_customer_features(date_str, bronze_feature_directory, silver_feature_directory, spark):
+def process_customer_features(bronze_feature_directory, silver_feature_directory, spark):
     # prepare arguments
-    snapshot_date = datetime.strptime(date_str, "%Y-%m-%d")
-    print(f'------------Processing for', date_str, '------------')
+    # snapshot_date = datetime.strptime(date_str, "%Y-%m-%d")
+    
+    print(f'------------Processing for financials and attributes------------')
     # connect to financials table
-    financials_partition_name = "bronze_financials_" + date_str.replace('-','_') + '.csv'
-    financials_filepath = bronze_feature_directory + "financials/" + financials_partition_name
+    financials_partition_name = "bronze_financials.csv"
+    financials_filepath = bronze_feature_directory + financials_partition_name
 
     financials_df = spark.read.csv(financials_filepath, header=True, inferSchema=True)
     print('loaded from:', financials_filepath, 'row count:', financials_df.count())
@@ -53,6 +54,7 @@ def process_customer_features(date_str, bronze_feature_directory, silver_feature
         .withColumn("Num_Credit_Inquiries", F.col("Num_Credit_Inquiries").cast("int")) \
         .withColumn("Changed_Credit_Limit", F.col("Changed_Credit_Limit").cast("double")) \
         .withColumn("Amount_invested_monthly", F.col("Amount_invested_monthly").cast("double"))
+    
 
     df3 = df2.withColumn("Annual_Income", F.round(F.col("Annual_Income"), 2)) \
         .withColumn("Monthly_Inhand_Salary", F.round(F.col("Monthly_Inhand_Salary"), 2)) \
@@ -151,15 +153,13 @@ def process_customer_features(date_str, bronze_feature_directory, silver_feature
                         .otherwise(0))
    
     new_financials_df = df11.drop("Monthly_Inhand_Salary", "Type_of_Loan", "Payment_Behaviour", "loan_types_array", "payment_of_min_amount", "payment_of_min_amount_no", "credit_mix")
-    # new_financials_df = new_financials_df.filter(F.col("snapshot_date") <= snapshot_date)
 
-    print('Processing financials data complete')
-    print('Financials data row count:', new_financials_df.count())
+    print('Processing financials data complete. Financials data row count:', new_financials_df.count())
 
     print('Begin to process attributes data')
     # connect to attributes table
-    attributes_partition_name = "bronze_attributes_" + date_str.replace('-','_') + '.csv'
-    attributes_filepath = bronze_feature_directory + "attributes/" + attributes_partition_name
+    attributes_partition_name = "bronze_attributes.csv"
+    attributes_filepath = bronze_feature_directory + attributes_partition_name
 
     processed_attributes = process_customer_attributes(attributes_filepath, spark)
 
@@ -169,19 +169,18 @@ def process_customer_features(date_str, bronze_feature_directory, silver_feature
     # Join financials and attributes data
     print('Merging financials and attributes data complete')
     
-    features_df = new_financials_df.join(processed_attributes, on=["Customer_ID","snapshot_date"], how="inner")
+    features_df = new_financials_df.join(processed_attributes, on="Customer_ID", how="inner")
     print('Merge complete. features_df row count:', features_df.count())
+    filepath = silver_feature_directory + "silver_financial_attributes.parquet"
 
-    print('Final financials features data row count:', new_financials_df.count())
-    partition_name = "/attributes/silver_customer_features_daily_" + date_str.replace('-','_') + '.parquet'
-    filepath = silver_feature_directory + partition_name
     new_financials_df.write.mode("overwrite").parquet(filepath)
-    print('\n \n Data processing has completed')
     # df.toPandas().to_parquet(filepath,
     #           compression='gzip')
     print('saved to:', filepath)
-
+    
     return new_financials_df
+
+    
 
 def process_silver_cs_features(snapshot_date_str, bronze_feature_directory, silver_feature_directory, spark):
     
@@ -191,25 +190,25 @@ def process_silver_cs_features(snapshot_date_str, bronze_feature_directory, silv
     cs_filepath = bronze_feature_directory + "clickstream/" + cs_partition_name
     
     cs_df = spark.read.csv(cs_filepath, header=True, inferSchema=True)
-    print('processing clickstream data starting....')
-    
+    print(f'------------Processing for clickstream data------------')
+   
     fe_count = [num for num in range(1,21)]
     column_type_map = {
-        f'fe_{num}': FloatType() for num in fe_count
+    **{f'fe_{num}': FloatType() for num in fe_count}, 
+    'Customer_ID': StringType(),      
+    'snapshot_date': DateType(),                 
     }
+    # Apply casting to the dataframe
     for column, new_type in column_type_map.items():
-        cs_df = cs_df.withColumn(column, col(column).cast(new_type))
-    column_type_map['CustomerID'] = StringType()
+        if column in cs_df.columns:
+            cs_df = cs_df.withColumn(column, col(column).cast(new_type))
 
-    print("clickstream processing complete")
-    print("clickstream row_count:",cs_df.count())
+    print("clickstream processing complete. clickstream row_count:",cs_df.count())
+
 
     partition_name = "clickstream/silver_clickstream_daily_" + snapshot_date_str.replace('-','_') + '.parquet'
     filepath = silver_feature_directory + partition_name
     cs_df.write.mode("overwrite").parquet(filepath)
-    print('\n \n Data processing has completed')
-    # df.toPandas().to_parquet(filepath,
-    #           compression='gzip')
     print('saved to:', filepath)
 
-    return cs_df 
+    return cs_df

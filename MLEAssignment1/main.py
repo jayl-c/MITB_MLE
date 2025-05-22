@@ -39,14 +39,13 @@ print('generating data from', start_date_str, 'to', end_date_str)
 
 # create bronze datalake
 bronze_lms_directory = "datamart/bronze/lms/"
-
 if not os.path.exists(bronze_lms_directory):
     os.makedirs(bronze_lms_directory)
-
 # run bronze backfill
 for date_str in dates_str_lst:
     utils.data_processing_bronze_table.process_bronze_table(date_str, bronze_lms_directory, spark)
 
+# create bronze datalake for features
 bronze_feature_directory = "datamart/bronze/features/"
 for date_str in dates_str_lst:
     utils.data_processing_bronze_table.process_bronze_feature_tables(date_str, bronze_feature_directory, spark)
@@ -67,10 +66,12 @@ silver_feature_directory = "datamart/silver/features/"
 if not os.path.exists(silver_feature_directory):
     os.makedirs(silver_feature_directory)
 
-for date_str in dates_str_lst:
-    utils.data_processing_features.process_customer_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
-    utils.data_processing_features.process_silver_cs_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
+# process silver  features
+utils.data_processing_features.process_customer_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
 
+for date_str in dates_str_lst:
+
+    utils.data_processing_features.process_silver_cs_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
 
 # create gold datalake
 gold_label_store_directory = "datamart/gold/label_store/"
@@ -89,8 +90,7 @@ if not os.path.exists(silver_feature_directory):
     os.makedirs(silver_feature_directory)
 
 for date_str in dates_str_lst:
-    utils.data_processing_gold_table.process_features_gold_table(date_str, end_date_str, silver_feature_directory, gold_feature_directory, spark)
-
+    utils.data_processing_gold_table.process_features_gold_table(date_str, snapshot_date_str, silver_feature_directory, gold_feature_directory, spark)
 
 folder_path = gold_label_store_directory
 files_list = glob.glob(os.path.join(folder_path, '*.parquet'))
