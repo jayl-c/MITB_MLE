@@ -64,12 +64,9 @@ def process_features_gold_table(date_str, snapshot_date, silver_feature_director
     clickstream_features_partition_name = "clickstream/silver_clickstream_daily_" + date_str.replace('-','_') + '.parquet'
     cs_filepath = silver_feature_directory + clickstream_features_partition_name
     cs_df = spark.read.parquet(cs_filepath)
-    
+
     cs_df = cs_df.filter(col("snapshot_date") <= enddate_str)
     fstore = cs_df.join(custf_df, on=["Customer_ID"], how="inner")
-    # fstore = fstore.drop("snapshot_date")
-    fstore.show()
-    # save feature store
 
     gold_partition_name = "gold_feature_store_" + date_str.replace('-','_') + '.parquet'
     gold_filepath = gold_feature_store_directory + gold_partition_name

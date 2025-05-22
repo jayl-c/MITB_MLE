@@ -46,7 +46,7 @@ def process_bronze_feature_tables(date_str, bronze_directory, spark):
     }
     
     for data_type, file_path in non_partitioned_data.items():
-        print(f"Processing {data_type} data...")
+        # print(f"Processing {data_type} data...")
         
         # Create directory if it doesn't exist
         type_directory = f"{bronze_directory}"
@@ -58,7 +58,7 @@ def process_bronze_feature_tables(date_str, bronze_directory, spark):
         # Store the DataFrame
         dfs[data_type] = df
         
-        print(f"{data_type} data row count: {df.count()}")
+        # print(f"{data_type} data row count: {df.count()}")
         
         # Save as single file (not partitioned by date)
         partition_name = f"bronze_{data_type}.csv"
@@ -66,7 +66,7 @@ def process_bronze_feature_tables(date_str, bronze_directory, spark):
         
         # Save as CSV
         df.toPandas().to_csv(filepath, index=False)
-        print(f'Saved {data_type} data to: {filepath}')
+        # print(f'Saved {data_type} data to: {filepath}')
     
     # Process clickstream data (partitioned by date) - saved in one folder with date-partitioned filenames
     print(f"Processing clickstream data for {date_str}...")
