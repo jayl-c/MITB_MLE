@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'retries': 1,
+    'retries': 1, # retry once evry 5 minutes
     'retry_delay': timedelta(minutes=5),
 }
 
@@ -14,7 +14,7 @@ with DAG(
     'dag',
     default_args=default_args,
     description='data pipeline run once a month',
-    schedule_interval='0 0 1 * *',  # At 00:00 on day-of-month 1
+    schedule_interval='0 0 1 * *',  # At 00:00 on day-of-month 1: when you want to run (translate to cron)
     start_date=datetime(2023, 1, 1),
     end_date=datetime(2024, 12, 1),
     catchup=True,
@@ -24,7 +24,7 @@ with DAG(
 
     # --- label store ---
 
-    dep_check_source_label_data = DummyOperator(task_id="dep_check_source_label_data")
+    dep_check_source_label_data = DummyOperator(task_id="dep_check_source_label_data") # fake task 
 
     bronze_label_store = BashOperator(
         task_id='run_bronze_label_store',
@@ -34,6 +34,7 @@ with DAG(
             '--snapshotdate "{{ ds }}"'
         ),
     )
+    # ds stands for date. this is where to input the date based on the schedule provided above. 
 
     silver_label_store = DummyOperator(task_id="silver_label_store")
 
@@ -45,7 +46,7 @@ with DAG(
     dep_check_source_label_data >> bronze_label_store >> silver_label_store >> gold_label_store >> label_store_completed
  
  
-    # --- feature store ---
+    # --- feature store --- chaining multiple bronze table to silver table
     dep_check_source_data_bronze_1 = DummyOperator(task_id="dep_check_source_data_bronze_1")
 
     dep_check_source_data_bronze_2 = DummyOperator(task_id="dep_check_source_data_bronze_2")
