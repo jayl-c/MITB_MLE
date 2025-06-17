@@ -23,21 +23,27 @@ with DAG(
     # data pipeline
 
     # --- label store ---
-
     dep_check_source_label_data = DummyOperator(task_id="dep_check_source_label_data") # fake task 
-
+    # Parallel processing of financial, clickstream, attribute and lms data.
     bronze_label_store = BashOperator(
         task_id='run_bronze_label_store',
         bash_command=(
-            'cd /opt/airflow/scripts && '
+            'cd /MLEAssignment2/scripts && '
             'python3 bronze_label_store.py '
             '--snapshotdate "{{ ds }}"'
         ),
     )
     # ds stands for date. this is where to input the date based on the schedule provided above. 
 
-    silver_label_store = DummyOperator(task_id="silver_label_store")
-
+    # silver_label_store = DummyOperator(task_id="silver_label_store")
+    silver_label_store = BashOperator(
+        task_id='run_silver_label_store',
+        bash_command=(
+            'cd /MLEAssignment2/scripts && '
+            'python3 silver_label_store.py '
+            '--snapshotdate "{{ ds }}"'
+        ),
+    )  
     gold_label_store = DummyOperator(task_id="gold_label_store")
 
     label_store_completed = DummyOperator(task_id="label_store_completed")
