@@ -10,7 +10,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
     entrypoint: >
-      /bin/bash -c "airflow db init &&
+      /bin/bash -c "airflow db upgrade && airflow db init &&
       airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
 
   airflow-webserver:
@@ -45,3 +45,107 @@ services:
 
 volumes:
   airflow_data:
+# x-airflow-common:
+#   &airflow-common
+#   build: .
+#   environment: &airflow-common-env
+#     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+#     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+#     AIRFLOW__CORE__FERNET_KEY: aVRNsJdQbGYaeCV79lqobBON-y0eWeMGed0j5ZQUaHw=
+#     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+#     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+#   volumes:
+#     - ./dags:/opt/airflow/dags
+#     - ./logs:/opt/airflow/logs
+#     - ./plugins:/opt/airflow/plugins
+#     - ./scripts:/opt/airflow/scripts
+#     # - ./airflow_data:/opt/airflow/dags
+#   # user: "${AIRFLOW_UID:-50000}:0"
+#   # depends_on: &airflow-common-depends-on
+#     # postgres:
+#       # condition: service_healthy
+
+# services:
+#   postgres:
+#     image: postgres:13
+#     environment:
+#       POSTGRES_USER: airflow
+#       POSTGRES_PASSWORD: airflow
+#       POSTGRES_DB: airflow
+#     volumes:
+#       - postgres-db-volume:/var/lib/postgresql/data
+#     restart: always
+
+#   airflow-apiserver:
+#     <<: *airflow-common
+#     command: api-server
+#     ports:
+#       - "8080:8080"
+#     environment:
+#       <<: *airflow-common-env
+#       _AIRFLOW_WWW_USER_CREATE: 'true'
+#       _AIRFLOW_WWW_USER_USERNAME: 'admin'
+#       _AIRFLOW_WWW_USER_PASSWORD: 'admin'
+#       _AIRFLOW_WWW_USER_EMAIL: 'admin@example.com'
+#       _AIRFLOW_WWW_USER_FIRSTNAME: 'Admin'
+#       _AIRFLOW_WWW_USER_LASTNAME: 'User'
+#     restart: always
+#     depends_on:
+#     #   <<: *airflow-common-depends-on
+#       - airflow-init
+#         # condition: service_completed_successfully
+
+#   airflow-scheduler:
+#     <<: *airflow-common
+#     command: scheduler
+#     restart: always
+#     depends_on:
+#       # <<: *airflow-common-depends-on
+#       - airflow-init
+#         # condition: service_completed_successfully
+
+#   airflow-init:
+#     <<: *airflow-common
+#     entrypoint: /bin/bash
+#     command:
+#       - -c
+#       - |
+#         echo "Initializing Airflow database..."
+#         airflow db migrate
+#         echo "Database migration completed"
+        
+#         echo "Creating missing opt dirs if missing:"
+#         echo
+#         mkdir -v -p /opt/airflow/{logs,dags,plugins,config}
+#         echo
+#         echo "Airflow version:"
+#         /entrypoint airflow version
+#         echo
+#         echo "Files in shared volumes:"
+#         echo
+#         ls -la /opt/airflow/{logs,dags,plugins,config}
+#         echo
+#         echo "Running airflow config list to create default config file if missing."
+#         echo
+#         /entrypoint airflow config list >/dev/null
+#         echo
+#         echo "Files in shared volumes:"
+#         echo
+#         ls -la /opt/airflow/{logs,dags,plugins,config}
+
+        
+#         echo "Initialization completed successfully"
+#     environment:
+#       <<: *airflow-common-env
+#     user: "0:0"
+#     volumes:
+#       # - ./:/sources
+#       - ./logs:/opt/airflow/logs
+#       - ./dags:/opt/airflow/dags
+#       - ./plugins:/opt/airflow/plugins
+#       - ./scripts:/opt/airflow/scripts
+#       # - ./airflow_data:/opt/airflow/dags
+
+# volumes:
+#   postgres-db-volume:
+#   # airflow_data:

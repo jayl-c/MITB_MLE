@@ -11,6 +11,7 @@ from dateutil.relativedelta import relativedelta
 import pprint
 import pyspark
 import pyspark.sql.functions as F
+from pyspark.sql import SparkSession
 
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
@@ -27,18 +28,17 @@ from sklearn.model_selection import train_test_split
 
 # to call this script: python model_train.py --snapshotdate "2024-09-01"
 
-def main(snapshotdate, modelname):
+def model_pred(snapshotdate, modelname, spark: SparkSession):
     print('\n\n---starting job---\n\n')
     
     # Initialize SparkSession
-    spark = pyspark.sql.SparkSession.builder \
-        .appName("dev") \
-        .master("local[*]") \
-        .getOrCreate()
+    # spark = pyspark.sql.SparkSession.builder \
+    #     .appName("dev") \
+    #     .master("local[*]") \
+    #     .getOrCreate()
     
     # Set log level to ERROR to hide warnings
-    spark.sparkContext.setLogLevel("ERROR")
-
+    # spark.sparkContext.setLogLevel("ERROR")
     
     # --- set up config ---
     config = {}
@@ -50,7 +50,6 @@ def main(snapshotdate, modelname):
     
     pprint.pprint(config)
     
-
     # --- load model artefact from model bank ---
     # Load the model from the pickle file
     with open(config["model_artefact_filepath"], 'rb') as file:
@@ -58,25 +57,24 @@ def main(snapshotdate, modelname):
     
     print("Model loaded successfully! " + config["model_artefact_filepath"])
 
-
     # --- load feature store ---
-    feature_location = "data/feature_clickstream.csv"
-    
+    gold_db = "datamart/gold"
+    partition_name = snapshotdate.replace('-','_') + '.parquet'
+    feature_filepath = os.path.join(gold_db, 'online_feature_store', partition_name)
+     
     # Load CSV into DataFrame - connect to feature store
-    features_store_sdf = spark.read.csv(feature_location, header=True, inferSchema=True)
+    features_store_sdf = spark.read.csv(feature_filepath, header=True, inferSchema=True)
     # print("row_count:",features_store_sdf.count())
-    
-    
+        
     # extract feature store
     features_sdf = features_store_sdf.filter((col("snapshot_date") == config["snapshot_date"]))
     print("extracted features_sdf", features_sdf.count(), config["snapshot_date"])
     
     features_pdf = features_sdf.toPandas()
-
-
     # --- preprocess data for modeling ---
     # prepare X_inference
-    feature_cols = [fe_col for fe_col in features_pdf.columns if fe_col.startswith('fe_')]
+    # feature_cols = [fe_col for fe_col in features_pdf.columns if fe_col.startswith('fe_')]
+    feature_cols = config.PREDICTORS
     X_inference = features_pdf[feature_cols]
     
     # apply transformer - standard scaler
@@ -84,7 +82,6 @@ def main(snapshotdate, modelname):
     X_inference = transformer_stdscaler.transform(X_inference)
     
     print('X_inference', X_inference.shape[0])
-
 
     # --- model prediction inference ---
     # load model
@@ -98,7 +95,6 @@ def main(snapshotdate, modelname):
     y_inference_pdf["model_name"] = config["model_name"]
     y_inference_pdf["model_predictions"] = y_inference
     
-
     # --- save model inference to datamart gold table ---
     # create bronze datalake
     gold_directory = f"datamart/gold/model_predictions/{config["model_name"][:-4]}/"
@@ -114,7 +110,6 @@ def main(snapshotdate, modelname):
     # df.toPandas().to_parquet(filepath,
     #           compression='gzip')
     print('saved to:', filepath)
-
     
     # --- end spark session --- 
     spark.stop()
@@ -123,6 +118,7 @@ def main(snapshotdate, modelname):
 
 
 if __name__ == "__main__":
+    
     # Setup argparse to parse command-line arguments
     parser = argparse.ArgumentParser(description="run job")
     parser.add_argument("--snapshotdate", type=str, required=True, help="YYYY-MM-DD")
@@ -131,4 +127,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Call main with arguments explicitly passed
-    main(args.snapshotdate, args.modelname)
+    model_pred(args.snapshotdate, args.modelname)
