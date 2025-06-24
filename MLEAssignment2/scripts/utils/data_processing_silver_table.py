@@ -252,6 +252,7 @@ def process_silver_table(table_name, bronze_db, silver_db, snapshot_date_str, sp
     """
     Wrapper function to build silver table
     """
+    
     # connect to bronze table
     partition_name = snapshot_date_str.replace('-','_') + '.csv'
     filepath = os.path.join(bronze_db, table_name, partition_name)

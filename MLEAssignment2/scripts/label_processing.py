@@ -8,6 +8,7 @@ import random
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import pprint
+import tqdm
 import pyspark
 import pyspark.sql.functions as F
 
@@ -18,16 +19,9 @@ from utils.data_processing_bronze_table import process_bronze_table
 from utils.data_processing_silver_table import process_silver_table
 from utils.data_processing_gold_table import read_silver_table, build_label_store, process_gold_label
 
-# to call this script: python bronze_label_store.py --snapshotdate "2023-01-01"
-def set_spark():
-    spark = pyspark.sql.SparkSession.builder \
-    .appName("dev") \
-    .master("local[*]") \
-    .getOrCreate()
-    
-    spark.sparkContext.setLogLevel("ERROR")
+from utils.helper import *
 
-    return spark
+# to call this script: python bronze_label_store.py --snapshotdate "2023-01-01"
 
 def bronze_label(snapshotdate):
     print('\n\n---starting job---\n\n')
@@ -106,6 +100,9 @@ def gold_label(snapshotdate):
 
 
 if __name__ == "__main__":
+
+    spark = set_spark()
+
     # Setup argparse to parse command-line arguments
     parser = argparse.ArgumentParser(description="run job")
     parser.add_argument("--snapshotdate", type=str, required=True, help="YYYY-MM-DD")
@@ -113,15 +110,18 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # Route to different functions based on task argument
-    if args.task == "bronze_label":
-        bronze_label(args.snapshotdate)
-    elif args.task == "silver_label":
-        silver_label(args.snapshotdate)
-    elif args.task == "gold_label":
-        gold_label(args.snapshotdate)
-    else:
-        raise ValueError(f"Unknown task: {args.task}")   
-    
-    # # Call main with arguments explicitly passed
-    # main(args.snapshotdate)
+    TASK_REGISTRY = {
+        "bronze_label": bronze_label,
+        "silver_label": silver_label,
+        "gold_label": gold_label 
+    }
+
+    task_func = TASK_REGISTRY[args.task]
+
+    if type == "training":
+        dates_str_lst = generate_first_of_month_dates_past_6_months(args.snapshotdate)
+        for date_str in tqdm(dates_str_lst, total=len(dates_str_lst), desc=f"Processing {args.task}"):
+            task_func(date_str, spark)
+    elif type == "inference":
+        task_func(args.snapshotdate, spark)
+

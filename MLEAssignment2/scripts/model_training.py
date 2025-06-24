@@ -16,7 +16,7 @@ from sklearn.metrics import roc_auc_score, fbeta_score, confusion_matrix, Confus
 from utils import model_monitor
 import numpy as np
 
-import config
+import config as cg
 import pickle
 import json
 
@@ -29,7 +29,7 @@ def read_gold_table(table, gold_db, type, spark):
     df = spark.read.option("header", "true").parquet(*files_list)
     return df
 
-def train_model(snapshot_date, type, spark: SparkSession):
+def train_model(snapshot_date, spark: SparkSession):
     """
     Train model 
     """   
@@ -40,20 +40,17 @@ def train_model(snapshot_date, type, spark: SparkSession):
     y_df = y_spark.toPandas().sort_values(by='customer_id')
 
     model_train_date_str = snapshot_date # pretend we're training the model at this time
-    train_test_period_months = 12
-    oot_period_months = 2
-    train_test_ratio = 0.2
 
     config = {}
     config["model_train_date_str"] = model_train_date_str
-    config["train_test_period_months"] = train_test_period_months
-    config["oot_period_months"] =  oot_period_months
+    config["train_test_period_months"] = cg.train_test_period_months
+    config["oot_period_months"] =  cg.oot_period_months
     config["model_train_date"] =  datetime.strptime(model_train_date_str, "%Y-%m-%d").date()
     config["oot_end_date"] =  config['model_train_date'] - timedelta(days = 1)
-    config["oot_start_date"] =  config['model_train_date'] - relativedelta(months = oot_period_months)
+    config["oot_start_date"] =  config['model_train_date'] - relativedelta(months = cg.oot_period_months)
     config["train_test_end_date"] =  config["oot_start_date"] - timedelta(days = 1)
-    config["train_test_start_date"] =  config["oot_start_date"] - relativedelta(months = train_test_period_months)
-    config["train_test_ratio"] = train_test_ratio 
+    config["train_test_start_date"] =  config["oot_start_date"] - relativedelta(months = cg.train_test_period_months)
+    config["train_test_ratio"] = cg.train_test_ratio 
 
     # Consider data from model training date
     y_model_df = y_df[(y_df['snapshot_date'] >= config['train_test_start_date']) & (y_df['snapshot_date'] <= config['model_train_date'])]
@@ -95,11 +92,7 @@ def train_model(snapshot_date, type, spark: SparkSession):
     model_path = f"model_bank/model_{snapshot_date}.pkl"
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     with open(model_path, "wb") as f:
-        pickle.dump(clf, f)
-
-    # Load model
-    # with open("model_bank/model.pkl", "rb") as f:
-    #     clf = pickle.load(f)
+        pickle.dump({'model': clf, 'scaler': scaler}, f)
 
     # Predict and evaluate
     y_pred_proba_train = clf.predict_proba(X_train_arr)[:, 1]
@@ -148,7 +141,7 @@ def pick_model_and_deploy(job_id):
 
     # Check if the new model and metrics exist
     if not os.path.exists(new_model_path) or not os.path.exists(new_metrics_path):
-        raise FileNotFoundError("Trained model or metrics not found. Did you forget to train?")
+        raise FileNotFoundError("Trained model or metrics not found.")
 
     # Load new model metrics
     with open(new_metrics_path, "r") as f:
@@ -172,3 +165,22 @@ def pick_model_and_deploy(job_id):
     else:
         print(f"ℹModel_{job_id}.pkl not deployed. Score {new_score:.4f} did not exceed production score {prod_score:.4f}")
         return prod_model_path 
+    
+def load_production_model():
+    """
+    Helper function to load the production model
+    """
+    prod_model_path = "model_bank/model_production.pkl"
+    prod_metrics_path = "model_bank/model_production_metrics.json"
+    
+    if not os.path.exists(prod_model_path):
+        raise FileNotFoundError("No production model found.")
+    
+    with open(prod_model_path, "rb") as f:
+        artifacts = pickle.load(f)
+        model = artifacts['model']
+        scaler = artifacts['scaler']
+    with open(prod_metrics_path, "r") as f:
+        metrics = json.load(f)
+    
+    return model, scaler, metrics

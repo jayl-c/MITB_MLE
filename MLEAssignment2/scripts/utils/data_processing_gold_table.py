@@ -215,7 +215,7 @@ def process_gold_features(silver_db, gold_db, date_str, type, spark):
         except Exception as e:
             print("No existing labels found. Building label store for first time...")
             df_label = build_label_store(6, 30, df_lms)              
-             
+
             # Save the labels for future use
             partition_name = date_str.replace('-','_') + '.parquet'
             label_filepath = os.path.join(gold_db, 'label_store', partition_name)

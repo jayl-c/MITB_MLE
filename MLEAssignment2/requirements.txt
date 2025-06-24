@@ -10,3 +10,5 @@ tqdm==4.67.1
 deepchecks
 evidently
 json
+glob
+xbg

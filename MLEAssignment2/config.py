@@ -22,3 +22,13 @@ PREDICTORS = ['annual_income',
 
 PATH_DIR_DATA = ""
 PATH_DIR_REPORT = "./report"
+
+train_test_period_months = 12
+oot_period_months = 2
+train_test_ratio = 0.2
+
+BRONZE_TASK_REGISTRY = {
+        "clickstream": bronze_clickstream,
+        "bronze_attributes": bronze_attributes,
+        "inference": bronze_financials,
+        }

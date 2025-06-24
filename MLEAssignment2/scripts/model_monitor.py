@@ -4,19 +4,36 @@ import pandas as pd
 import numpy as np
 import os
 import datetime
+import glob
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
 import config
+from scripts.utils import data_processing_gold_table as dg
 
 from sklearn.ensemble import BaseEnsemble
-from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset
-from evidently.test_suite import TestSuite
-from evidently.test_preset import DataStabilityTestPreset
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, fbeta_score, confusion_matrix, ConfusionMatrixDisplay
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
 logging.info("Data drift report saved at: %s", config.PATH_DIR_REPORT)
+
+
+def read_pred(gold_db, spark):
+    """
+    Helper function to read all partitions of model predictions
+    """
+    folder_path = os.path.join(gold_db, 'model_predictions')
+    
+    # Option 1: Read all parquet files recursively
+    files_list = glob.glob(os.path.join(folder_path, '**', '*.parquet'), recursive=True)
+   
+    if not files_list:
+        raise FileNotFoundError(f"No parquet files found in {folder_path}")
+    
+    df = spark.read.option("header", "true").parquet(*files_list)
+    return df
 
 def calculate_psi(expected: pd.Series, actual: pd.Series, buckets: int = 10) -> float:
     """
@@ -41,56 +58,79 @@ def calculate_psi(expected: pd.Series, actual: pd.Series, buckets: int = 10) -> 
     psi = ((expected_dist - actual_dist) * np.log(expected_dist / actual_dist)).sum()
     return round(psi, 4)
 
-
-
-def check_data_drift(ref_df:pd.DataFrame, latest_df:pd.DataFrame):
+def check_model_drift(spark, snapshot_date: str, beta: float = 1.5):
     """
-    Using Evidently to check for data drift 
+    Check for model drift by comparing current batch to reference OOT period from config.
+    Handles cases where labels are missing for the current batch.
     """
-    report = Report(metrics=[DataDriftPreset()])
-    report.run(reference_data=ref_df, current_data=latest_df)
+    # Convert snapshot_date
+    snapshot_dt = datetime.strptime(snapshot_date, "%Y-%m-%d").date()
 
-    # Convert report to dict to extract drift information
-    results = report.as_dict()
-    
-    # Check drift status
-    drift_info = results["metrics"][0]["result"]
-    drift_detected = drift_info.get("dataset_drift", False)
-    n_drifted = drift_info.get("n_drifted_features", 0)
-    retrain = drift_detected or (n_drifted > 0)
+    # --- Define OOT reference window using config ---
+    oot_end = snapshot_dt - timedelta(days=1)
+    oot_start = snapshot_dt - relativedelta(months=config.oot_period_months)
 
-    # Get PSI for numeric features
-    psi_report = {}
-    for col in config.PREDICTORS:
-        if pd.api.types.is_numeric_dtype(ref_df[col]) and pd.api.types.is_numeric_dtype(latest_df[col]):
-            psi = calculate_psi(ref_df[col].dropna(), latest_df[col].dropna())
-            psi_report[col] = round(psi, 4)
+    cur_start = snapshot_dt  # current batch is for this date
+    cur_end = snapshot_dt    # daily batch
 
-    # Save report as HTML
-    os.makedirs(config.PATH_DIR_REPORT, exist_ok=True)
-    report_path = os.path.join(config.PATH_DIR_REPORT, f"{job_id}_data_drift_report.html")
-    
-    try:
-        report.save_html(report_path)
-        print(f"[INFO] Data drift report saved at: {report_path}")
-    except Exception as e:
-        print(f"[WARNING] Could not save drift report: {e}")
+    # --- Read predictions and labels from store ---
+    preds_df = dg.read_pred("datamart/gold", spark).toPandas()
+    labels_df = dg.read_gold_labels("datamart/gold", spark).toPandas()
 
-    return {
-        "report": report,
-        "retrain": retrain,
-        "drifted_features": drift_info.get("drift_by_columns", []),
-        "n_drifted": n_drifted,
-        "results": results
+    # --- Reference (OOT) batch ---
+    ref_preds = preds_df[(preds_df["snapshot_date"] >= oot_start) & (preds_df["snapshot_date"] <= oot_end)]
+    ref_labels = labels_df[(labels_df["snapshot_date"] >= oot_start) & (labels_df["snapshot_date"] <= oot_end)]
+
+    # --- Current batch ---
+    cur_preds = preds_df[preds_df["snapshot_date"] == cur_start]
+    cur_labels = labels_df[labels_df["snapshot_date"] == cur_start] if not labels_df.empty else None
+
+    # --- Join predictions with labels ---
+    ref_df = pd.merge(ref_preds, ref_labels, on="customer_id")
+    cur_df = pd.merge(cur_preds, cur_labels, on="customer_id") if cur_labels is not None else cur_preds
+
+    # --- Extract arrays ---
+    reference_probs = ref_df["model_predictions"].values
+    reference_labels = ref_df["label"].values
+
+    current_probs = cur_df["model_predictions"].values
+    current_labels = cur_df["label"].values if "label" in cur_df.columns else None
+
+    # --- 1. Prediction Drift (PSI) ---
+    psi_score = calculate_psi(pd.Series(reference_probs), pd.Series(current_probs))
+    result = {
+        "prediction_psi": round(psi_score, 4),
+        "prediction_drift": psi_score > 0.1
     }
 
-def check_model_drift():
-    pass
+    # --- 2. Performance Drift (if labels are available) ---
+    if current_labels is not None:
+        threshold = 0.5
+        ref_pred = reference_probs > threshold
+        cur_pred = current_probs > threshold
+
+        ref_perf = performance_report(reference_labels, ref_pred, reference_probs)
+        cur_perf = performance_report(current_labels, cur_pred, current_probs)
+
+        result.update({
+            "ref_perf": ref_perf,
+            "cur_perf": cur_perf,
+            "perf_drift_auc": round(ref_perf["auc"] - cur_perf["auc"], 4),
+            f"perf_drift_f{beta}": round(
+                fbeta_score(reference_labels, ref_pred, beta=beta) -
+                fbeta_score(current_labels, cur_pred, beta=beta), 4),
+            "performance_drift": cur_perf["auc"] < ref_perf["auc"] - 0.05  # adjustable
+        })
+    else:
+        logging.warning("Labels are not available for the current batch. Skipping performance drift calculation.")
+
+    return result
 
 def performance_report(y_true: np.array, y_pred: np.array, y_prob: np.array) -> dict:
     """
     Generate performance report for a model.
     """
+
     report = dict()
     report["dataset size"] = y_true.shape[0]
     report["positive rate"] = y_true.sum() / y_true.shape[0]
