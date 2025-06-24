@@ -16,7 +16,8 @@ from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 import utils.data_processing_bronze_table
 import utils.data_processing_silver_table
 import utils.data_processing_gold_table
-
+import utils.data_processing_features
+import utils.generator_fn as fn
 
 # Initialize SparkSession
 spark = pyspark.sql.SparkSession.builder \
@@ -28,61 +29,46 @@ spark = pyspark.sql.SparkSession.builder \
 spark.sparkContext.setLogLevel("ERROR")
 
 # set up config
-snapshot_date_str = "2023-01-01"
+snapshot_date_str = "2025-11-01"
 
 start_date_str = "2023-01-01"
-end_date_str = "2024-12-01"
+end_date_str = "2025-01-01"
 
-# generate list of dates to process
-def generate_first_of_month_dates(start_date_str, end_date_str):
-    # Convert the date strings to datetime objects
-    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
-    
-    # List to store the first of month dates
-    first_of_month_dates = []
+dates_str_lst = fn.generate_first_of_month_dates(start_date_str, end_date_str)
+print('generating data from', start_date_str, 'to', end_date_str)
 
-    # Start from the first of the month of the start_date
-    current_date = datetime(start_date.year, start_date.month, 1)
-
-    while current_date <= end_date:
-        # Append the date in yyyy-mm-dd format
-        first_of_month_dates.append(current_date.strftime("%Y-%m-%d"))
-        
-        # Move to the first of the next month
-        if current_date.month == 12:
-            current_date = datetime(current_date.year + 1, 1, 1)
-        else:
-            current_date = datetime(current_date.year, current_date.month + 1, 1)
-
-    return first_of_month_dates
-
-dates_str_lst = generate_first_of_month_dates(start_date_str, end_date_str)
-print(dates_str_lst)
-
-# create bronze datalake
+#################### create bronze datalake
 bronze_lms_directory = "datamart/bronze/lms/"
-
 if not os.path.exists(bronze_lms_directory):
     os.makedirs(bronze_lms_directory)
-
 # run bronze backfill
 for date_str in dates_str_lst:
     utils.data_processing_bronze_table.process_bronze_table(date_str, bronze_lms_directory, spark)
 
+#################### create bronze datalake for features
+bronze_feature_directory = "datamart/bronze/"
+for date_str in dates_str_lst:
+    utils.data_processing_bronze_table.process_bronze_feature_tables(date_str, bronze_feature_directory, spark)
 
-# create bronze datalake
+#################### create silver datalake
 silver_loan_daily_directory = "datamart/silver/loan_daily/"
-
 if not os.path.exists(silver_loan_daily_directory):
     os.makedirs(silver_loan_daily_directory)
-
 # run silver backfill
 for date_str in dates_str_lst:
     utils.data_processing_silver_table.process_silver_table(date_str, bronze_lms_directory, silver_loan_daily_directory, spark)
 
+#################### create silver datalake for features
+silver_feature_directory = "datamart/silver/"
+if not os.path.exists(silver_feature_directory):
+    os.makedirs(silver_feature_directory)
 
-# create bronze datalake
+# process silver features
+utils.data_processing_features.process_customer_features(bronze_feature_directory, silver_feature_directory, spark)
+for date_str in dates_str_lst:
+    utils.data_processing_features.process_silver_cs_features(date_str, bronze_feature_directory, silver_feature_directory, spark)
+
+#################### create gold label datalake
 gold_label_store_directory = "datamart/gold/label_store/"
 
 if not os.path.exists(gold_label_store_directory):
@@ -90,11 +76,18 @@ if not os.path.exists(gold_label_store_directory):
 
 # run gold backfill
 for date_str in dates_str_lst:
-    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
+    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 60, mob = 6)
 
+#################### create gold tables for features
+gold_feature_directory = "datamart/gold/feature_store/"
+if not os.path.exists(gold_feature_directory):
+    os.makedirs(gold_feature_directory)
+# run gold backfill
+for date_str in dates_str_lst:
+    utils.data_processing_gold_table.process_features_gold_table(date_str, end_date_str,silver_feature_directory, gold_feature_directory, spark)
 
 folder_path = gold_label_store_directory
-files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
+files_list = glob.glob(os.path.join(folder_path, '*.parquet'))
 df = spark.read.option("header", "true").parquet(*files_list)
 print("row_count:",df.count())
 
