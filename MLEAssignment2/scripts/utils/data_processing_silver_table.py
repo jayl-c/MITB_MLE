@@ -250,15 +250,15 @@ def process_df_lms(df):
 ############################
 def process_silver_table(table_name, bronze_db, silver_db, snapshot_date_str, spark):
     """
-    Wrapper function to build silver table
+    Wrapper function to build silver table, saving based on processing type (training/inference)
     """
-    
+
     # connect to bronze table
-    partition_name = snapshot_date_str.replace('-','_') + '.csv'
+    partition_name = snapshot_date_str.replace('-', '_') + '.csv'
     filepath = os.path.join(bronze_db, table_name, partition_name)
     df = spark.read.csv(filepath, header=True, inferSchema=True)
 
-    # Change all column names to be lowercase
+    # Change all column names to lowercase
     df = df.toDF(*[col_name.lower() for col_name in df.columns])
 
     if table_name == "attributes":
@@ -272,8 +272,14 @@ def process_silver_table(table_name, bronze_db, silver_db, snapshot_date_str, sp
     else:
         raise ValueError("Table does not exist!")
 
+    # Set output path based on type
+    output_dir = os.path.join(silver_db, table_name)
+    os.makedirs(output_dir, exist_ok=True)
+
     # Save silver table
-    partition_name = snapshot_date_str.replace('-','_') + '.parquet'
-    filepath = os.path.join(silver_db, table_name, partition_name)
+    partition_name = snapshot_date_str.replace('-', '_') + '.parquet'
+    filepath = os.path.join(output_dir, partition_name)
     df.write.mode("overwrite").parquet(filepath)
+
     return df
+

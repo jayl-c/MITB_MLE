@@ -1,13 +1,8 @@
 from airflow import DAG
-# from airflow.providers.standard.operators.bash import BashOperator
-# from airflow.providers.standard.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.dummy import DummyOperator
 from datetime import datetime, timedelta
-# from scripts.model_monitor import check_model_drift, calculate_psi, performance_report
-# from MLEAssignment2.scripts.logreg_modeltrain import train_model, pick_model_and_deploy
-import uuid
 
 default_args = {
     'owner': 'airflow',
@@ -17,23 +12,21 @@ default_args = {
 }
 
 with DAG(
-    'inference_pipeline',
+    'training_pipeline',
     default_args=default_args,
     description='data pipeline run once a month',
     schedule='0 0 1 * *',  # At 00:00 on day-of-month 1: when you want to run (translate to cron)
-    start_date=datetime(2022, 1, 1),
-    end_date=datetime(2024, 9, 1),
+    start_date=datetime(2023, 1, 1),
+    end_date=datetime(2024, 8, 1),
     catchup=True,
 
 ) as dag:
-
-    job_id = str(uuid.uuid4()).replace("-", "")
 
     #################
     # data pipeline #
     #################    
     # --- label store ---
-    dep_check_source_label_data = DummyOperator(task_id="dep_check_source_label_data") # fake task 
+    # dep_check_source_label_data = DummyOperator(task_id="dep_check_source_label_data") # fake task 
 
     # Parallel processing of financial, clickstream, attribute and lms data.
     bronze_label_store = BashOperator(
@@ -41,8 +34,8 @@ with DAG(
         bash_command=(
             'cd /opt/airflow/scripts && '
             'python3 label_processing.py '
-            '--snapshotdate "{{ ds }}"'
-            '--task bronze_label'
+            '--snapshotdate "{{ ds }}" '
+            '--task bronze_label '
         ),
     )
 
@@ -52,8 +45,8 @@ with DAG(
         bash_command=(
             'cd /opt/airflow/scripts && '
             'python3 label_processing.py '
-            '--snapshotdate "{{ ds }}"'
-            '--task silver_label'
+            '--snapshotdate "{{ ds }}" '
+            '--task silver_label '
         ),
     )
 
@@ -63,8 +56,9 @@ with DAG(
         bash_command=(
             'cd /opt/airflow/scripts && '
             'python3 label_processing.py '
-            '--snapshotdate "{{ ds }}"'
-            '--task gold_label'
+            '--snapshotdate "{{ ds }}" '
+            '--task gold_label '
+            '--type training'
         ),
     )
     label_store_completed = DummyOperator(task_id="label_store_completed")
@@ -76,7 +70,7 @@ with DAG(
         'cd /opt/airflow/scripts && '
         'python3 feature_processing.py '
         '--snapshotdate "{{ ds }}" '
-        '--task bronze_clickstream'
+        '--task bronze_clickstream '
         ),
     )
 
@@ -86,7 +80,7 @@ with DAG(
             'cd /opt/airflow/scripts && '
             'python3 feature_processing.py'
             ' --snapshotdate "{{ ds }}" '
-            '--task bronze_attributes'
+            '--task bronze_attributes '
         )
     )
 
@@ -96,9 +90,19 @@ with DAG(
             'cd /opt/airflow/scripts && '
             'python3 feature_processing.py '
             '--snapshotdate "{{ ds }}" '
-            '--task bronze_financials'
+            '--task bronze_financials '
         )
     )
+    # bronze_lms_task = BashOperator(
+    # task_id='bronze_lms',
+    # bash_command=(
+    #     'cd /opt/airflow/scripts && '
+    #     'python3 feature_processing.py '
+    #     '--snapshotdate "{{ ds }}" '
+    #     '--task bronze_lms '
+    #     '--type training'
+    #     )
+    # )
 
     silver_clickstream_task = BashOperator(
     task_id='silver_clickstream',
@@ -106,7 +110,7 @@ with DAG(
         'cd /opt/airflow/scripts && '
         'python3 feature_processing.py '
         '--snapshotdate "{{ ds }}" '
-        '--task silver_clickstream'
+        '--task silver_clickstream ' \
         )
     )
 
@@ -116,7 +120,7 @@ with DAG(
             'cd /opt/airflow/scripts && '
             'python3 feature_processing.py '
             '--snapshotdate "{{ ds }}" '
-            '--task silver_attributes'
+            '--task silver_attributes '
         )
     )
 
@@ -129,6 +133,16 @@ with DAG(
             '--task silver_financials'
         )
     )
+    # silver_lms_task = BashOperator(
+    # task_id='silver_lms',
+    # bash_command=(
+    #     'cd /opt/airflow/scripts && '
+    #     'python3 feature_processing.py '
+    #     '--snapshotdate "{{ ds }}" '
+    #     '--task silver_lms '
+    #     '--type training'
+    #     )
+    # )
 
     # gold_feature_store = DummyOperator(task_id="gold_feature_store")
     gold_feature_store = BashOperator(
@@ -138,103 +152,61 @@ with DAG(
             'python3 feature_processing.py '
             '--snapshotdate "{{ ds }}" '
             '--task gold_features '
-            '--type inference'
         )
     )
-    bronze_processing_completed = DummyOperator(task_id="bronze_processing_completed")
+    bronze_feature_processing_completed = DummyOperator(task_id="bronze_feature_processing_completed")
+
+    bronze_label_processing_completed = DummyOperator(task_id="bronze_label_processing_completed")
+
     silver_processing_completed = DummyOperator(task_id="silver_processing_completed")
+
     feature_store_completed = DummyOperator(task_id="feature_store_completed")
+    gold_stores_completed = DummyOperator(task_id="gold_store_completed")
     
     # Define task dependencies to run scripts sequentially
     # Bronze layer parallel processing
-    [bronze_clickstream_task, bronze_attributes_task, bronze_financials_task] >> bronze_processing_completed
+    [bronze_clickstream_task, bronze_attributes_task, bronze_financials_task] >> bronze_feature_processing_completed
 
     # Silver layer processing
-    bronze_processing_completed >> [silver_clickstream_task, silver_attributes_task, silver_financials_task] >> silver_processing_completed
+    bronze_feature_processing_completed >> [silver_clickstream_task, silver_attributes_task, silver_financials_task] >> silver_processing_completed
 
-    dep_check_source_label_data >> bronze_label_store >> silver_label_store
+    bronze_label_store >> bronze_label_processing_completed    
+    bronze_label_processing_completed >> silver_label_store >> silver_processing_completed
 
     # Gold layer processing
-    gold_feature_store >> feature_store_completed
-    gold_label_store >> label_store_completed
+    silver_processing_completed >> [gold_feature_store, gold_label_store] >> gold_stores_completed
+    
+    # gold_feature_store >> feature_store_completed
+    # gold_label_store >> label_store_completed
 
-    model_train = BashOperator(
-        task_id='training_model',
+    train_xgb_model = BashOperator(
+        task_id='training_model_xgb',
         bash_command =(
             'cd /opt/airflow/scripts && '
-            'python3 model_train.py '
+            'python3 train_xgb_model.py '
             '--job train '
             '--snapshotdate "{{ ds }}"'
         ) 
     )
 
+    train_lg_model = BashOperator(
+        task_id='training_model_lg',
+        bash_command =(
+            'cd /opt/airflow/scripts && '
+            'python3 train_logreg_model.py '
+            '--snapshotdate "{{ ds }}"'
+        ) 
+    )
+    gold_stores_completed >> train_xgb_model
+    gold_stores_completed >> train_lg_model
+
+
     deploy_model = BashOperator(
         task_id='deploy_best',
         bash_command = (
             'cd /opt/airflow/scripts && '
-            'python3 model_training.py '
+            'python3 model_deploy.py '
             '--job deploy '
             '--snapshotdate "{{ ds }}"'
         )
     )
-
-     # --- model inference ---
-    model_inference_start = DummyOperator(task_id="batch_inference_start")
-    # model_inference = BashOperator(
-    #     task_id="model_inference",
-    #     bash_command = (
-    #         'cd /opt/airflow/scripts && '
-    #         'python3 model_inference.py '
-    #         '--snapshotdate "{{ ds }}"'
-    #     )
-    # )
-
-    # online_features = BashOperator(
-    #     task_id='gold_features',
-    #     bash_command=(
-    #         'cd /opt/airflow/scripts && '
-    #         'python3 feature_processing.py '
-    #         '--snapshotdate "{{ ds }}" '
-    #         '--task gold_features '
-    #         '--type inference'
-    #     )
-    # )
-
-    model_inference_completed = DummyOperator(task_id="model_inference_completed")
-
-    # model_monitor = PythonOperator(
-    #     task_id="check_model_drift",
-    #     python_callable=check_model_drift,
-    #     op_kwargs={
-    #         "spark": spark,
-    #         "snapshot_date": "{{ ds }}",  # Pass the execution date as the snapshot_date
-    #         "beta": 1.5,  # Optional beta parameter for F-beta score
-    #     },
-    # )
-    
-    # Define task dependencies to run scripts sequentially
-    feature_store_completed >> model_inference_start
-    # model_inference_start >> model_inference >> model_inference_completed
-    
-    # --- model monitoring ---
-    model_monitor_start = DummyOperator(task_id="model_monitor_start")
-
-    model_monitor = DummyOperator(task_id="model_1_monitor")
-
-    model_monitor_completed = DummyOperator(task_id="model_monitor_completed")
-    
-    # Define task dependencies to run scripts sequentially
-    model_inference_completed >> model_monitor_start
-    model_monitor_start >> model_monitor >> model_monitor_completed
-
-    # --- model auto training ---
-    model_automl_start = DummyOperator(task_id="model_automl_start")
-    model_1_automl = DummyOperator(task_id="model_1_automl")
-    model_2_automl = DummyOperator(task_id="model_2_automl")
-    model_automl_completed = DummyOperator(task_id="model_automl_completed")
-    
-    # Define task dependencies to run scripts sequentially
-    # feature_store_completed >> model_automl_start
-    # label_store_completed >> model_automl_start
-    # model_automl_start >> model_1_automl >> model_automl_completed
-    # model_automl_start >> model_2_automl >> model_automl_completed

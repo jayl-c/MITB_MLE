@@ -19,14 +19,12 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logging.info("Data drift report saved at: %s", config.PATH_DIR_REPORT)
 
-
 def read_pred(gold_db, spark):
     """
     Helper function to read all partitions of model predictions
     """
     folder_path = os.path.join(gold_db, 'model_predictions')
     
-    # Option 1: Read all parquet files recursively
     files_list = glob.glob(os.path.join(folder_path, '**', '*.parquet'), recursive=True)
    
     if not files_list:

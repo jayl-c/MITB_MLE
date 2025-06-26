@@ -27,8 +27,33 @@ train_test_period_months = 12
 oot_period_months = 2
 train_test_ratio = 0.2
 
-BRONZE_TASK_REGISTRY = {
-        "clickstream": bronze_clickstream,
-        "bronze_attributes": bronze_attributes,
-        "inference": bronze_financials,
-        }
+def create_model_artifact(best_model, transformer_stdscaler, config, 
+                         X_train, X_test, X_oot, y_train, y_test, y_oot,
+                         train_auc_score, test_auc_score, oot_auc_score, 
+                         random_search):
+    """Create model artifact dictionary from config template"""
+    return {
+        'model': best_model,
+        'model_version': f"credit_model_{config['model_train_date_str'].replace('-','_')}",
+        'preprocessing_transformers': {
+            'stdscaler': transformer_stdscaler
+        },
+        'data_dates': config,
+        'data_stats': {
+            'X_train': X_train.shape[0],
+            'X_test': X_test.shape[0],
+            'X_oot': X_oot.shape[0],
+            'y_train': round(y_train.mean(), 2),
+            'y_test': round(y_test.mean(), 2),
+            'y_oot': round(y_oot.mean(), 2)
+        },
+        'results': {
+            'auc_train': train_auc_score,
+            'auc_test': test_auc_score,
+            'auc_oot': oot_auc_score,
+            'gini_train': round(2*train_auc_score-1, 3),
+            'gini_test': round(2*test_auc_score-1, 3),
+            'gini_oot': round(2*oot_auc_score-1, 3)
+        },
+        'hp_params': random_search.best_params_
+    }

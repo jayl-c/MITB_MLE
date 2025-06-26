@@ -23,7 +23,7 @@ from utils.helper import *
 
 # to call this script: python bronze_label_store.py --snapshotdate "2023-01-01"
 
-def bronze_label(snapshotdate):
+def bronze_label(snapshotdate, spark:SparkSession):
     print('\n\n---starting job---\n\n')
     
     # Initialize SparkSession
@@ -33,69 +33,55 @@ def bronze_label(snapshotdate):
     date_str = snapshotdate
     
     # create bronze datalake
-    bronze_lms_directory = "datamart/bronze"
-    
+    bronze_lms_directory = "/opt/airflow/datamart/bronze"
+    bronze_lms_path = "/opt/airflow/data/lms_loan_daily.csv"
     if not os.path.exists(bronze_lms_directory):
         os.makedirs(bronze_lms_directory)
 
     # run data processing
-    process_bronze_table('lms', 'data/lms_loan_daily.csv', bronze_lms_directory, date_str, spark)
+    process_bronze_table('lms', bronze_lms_path, bronze_lms_directory, date_str, spark)
     
     # end spark session
     spark.stop()
     
     print('\n\n---completed job---\n\n')
 
-def silver_label(snapshotdate):
+def silver_label(snapshotdate, spark:SparkSession):
     print('\n\n---starting job---\n\n')
     
     # Initialize SparkSession
     spark = set_spark()
 
-    # load arguments
+    # Use consistent pathing
     date_str = snapshotdate
+    bronze_directory = "/opt/airflow/datamart/bronze"
+    silver_directory = "/opt/airflow/datamart/silver"
 
-    # bronze directory
-    bronze_directory = "datamart/bronze"
-    
-    # create silver datalake
-    silver_directory = "datamart/silver"
+    # Ensure directory exists (safe to do regardless of mount)
+    os.makedirs(silver_directory, exist_ok=True)
 
-    if not os.path.exists(silver_directory):
-        os.makedirs(silver_directory)
-
-    # run data processing
+    # Run transformation
     process_silver_table('lms', bronze_directory, silver_directory, date_str, spark)
     
-    # end spark session
     spark.stop()
-    
     print('\n\n---completed job---\n\n')
 
-def gold_label(snapshotdate):
+
+def gold_label(snapshotdate, spark:SparkSession):
     print('\n\n---starting job---\n\n')
     
     # Initialize SparkSession
     spark = set_spark()
 
-    # load arguments
     date_str = snapshotdate
- 
-    # silver datalake
-    silver_directory = "datamart/silver"
+    silver_directory = "/opt/airflow/datamart/silver"
+    gold_directory = "/opt/airflow/datamart/gold"
 
-    # gold directory
-    gold_directory = "datamart/gold"
+    os.makedirs(gold_directory, exist_ok=True)
 
-    if not os.path.exists(gold_directory):
-        os.makedirs(gold_directory)
-
-    # run data processing
     process_gold_label(silver_directory, gold_directory, date_str, spark)
 
-    # end spark session
     spark.stop()
-    
     print('\n\n---completed job---\n\n')
 
 
@@ -106,7 +92,7 @@ if __name__ == "__main__":
     # Setup argparse to parse command-line arguments
     parser = argparse.ArgumentParser(description="run job")
     parser.add_argument("--snapshotdate", type=str, required=True, help="YYYY-MM-DD")
-    parser.add_argument("--task", type=str, required=True, help="Which task to run")
+    # parser.add_argument("--task", type=str, required=True, help="Which task to run")
     
     args = parser.parse_args()
 
@@ -118,10 +104,6 @@ if __name__ == "__main__":
 
     task_func = TASK_REGISTRY[args.task]
 
-    if type == "training":
-        dates_str_lst = generate_first_of_month_dates_past_6_months(args.snapshotdate)
-        for date_str in tqdm(dates_str_lst, total=len(dates_str_lst), desc=f"Processing {args.task}"):
-            task_func(date_str, spark)
-    elif type == "inference":
-        task_func(args.snapshotdate, spark)
+    task_func(args.snapshotdate, spark)
+    
 

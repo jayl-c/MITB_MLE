@@ -26,23 +26,22 @@ from sklearn.metrics import make_scorer, f1_score, roc_auc_score
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
-from model_training import load_production_model
+from scripts.logreg_modeltrain import load_production_model
+from model_deploy import best_model
 
 # to call this script: python model_train.py --snapshotdate "2024-09-01"
-def model_pred(snapshotdate, spark: SparkSession):
-    print('\n\n---starting job---\n\n')
-    
-    # Load production model directly
-    model, scaler, metrics = load_production_model()
-    
-    # --- set up config ---
+# --- set up config ---
+def model_pred(snapshotdate, spark: SparkSession, model_name: str = "fraud_detection"):
+
     config = {}
     config["snapshot_date_str"] = snapshotdate
     config["snapshot_date"] = datetime.strptime(config["snapshot_date_str"], "%Y-%m-%d")
-    config["model_name"] = "production_model"  # Fixed: use string not model object
+    config["model_name"] = f"{model_name}_{metrics['model_type'].lower()}" 
+    config["model_version"] = metrics['model_path'].split('/')[-1].replace('.pkl', '')  # Extract filename
     
     pprint.pprint(config)
     print("Production model loaded successfully!")
+    print(f"Using {metrics['model_type']} with OOT AUC: {metrics['oot_auc']:.4f}")
 
     # --- load feature store ---
     gold_db = "datamart/gold"
@@ -57,25 +56,29 @@ def model_pred(snapshotdate, spark: SparkSession):
     print("extracted features_sdf", features_sdf.count(), config["snapshot_date_str"])
     
     features_pdf = features_sdf.toPandas()
-    
-    # --- preprocess data for modeling ---
-    # prepare X_inference
-    feature_cols = cg.PREDICTORS
+       
     X_inference = features_pdf[feature_cols]
     
-    # apply transformer - use scaler from load_production_model()
+    # apply transformer - use scaler from trained model
     X_inference_scaled = scaler.transform(X_inference)
     
     print('X_inference', X_inference_scaled.shape[0])
 
     # --- model prediction inference ---
-    # Use model from load_production_model()
-    y_inference = model.predict_proba(X_inference_scaled)[:, 1]
+    # Get probability predictions
+    y_inference_proba = model.predict_proba(X_inference_scaled)[:, 1]
     
-    # prepare output
+    # Get binary predictions using the best threshold from training
+    y_inference_binary = (y_inference_proba > metrics['best_threshold']).astype(int)
+    
+    # prepare output with both probability and binary predictions
     y_inference_pdf = features_pdf[["customer_id","snapshot_date"]].copy()
     y_inference_pdf["model_name"] = config["model_name"]
-    y_inference_pdf["model_predictions"] = y_inference
+    y_inference_pdf["model_version"] = config["model_version"]
+    y_inference_pdf["model_predictions"] = y_inference_proba  # Keep your original column name
+    y_inference_pdf["model_predictions_binary"] = y_inference_binary
+    y_inference_pdf["model_threshold"] = metrics['best_threshold']
+    y_inference_pdf["model_oot_auc"] = metrics['oot_auc']
     
     # --- save model inference to datamart gold table ---
     # create gold directory
@@ -85,14 +88,15 @@ def model_pred(snapshotdate, spark: SparkSession):
     if not os.path.exists(gold_directory):
         os.makedirs(gold_directory)
     
-    # save gold table
+    # save gold table with more detailed naming
     partition_name = config["model_name"] + "_predictions_" + config["snapshot_date_str"].replace('-','_') + '.parquet'
     filepath = gold_directory + partition_name
     spark.createDataFrame(y_inference_pdf).write.mode("overwrite").parquet(filepath)
     print('saved to:', filepath)
-    
+      
     print('\n\n---completed job---\n\n')
-
+    
+    return y_inference_pdf
 
 if __name__ == "__main__":
     # Setup argparse to parse command-line arguments

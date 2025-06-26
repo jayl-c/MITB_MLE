@@ -80,15 +80,15 @@ def one_hot_encoder(df, category_col):
     df = df.drop(category_col, f"{category_col}_index", f"{category_col}_ohe", f"{category_col}_array")
     return df
 
-def build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstream, df_lms, df_label, type):
+def build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstream, df_lms, df_label):
     #############
     # Join attributes and financials into a single matrix
     #############
     df_joined = df_attributes.join(df_financials, on=["customer_id", "snapshot_date"], how="inner")
     df_joined = df_joined.join(df_loan_type, on=["customer_id", "snapshot_date"], how="inner")
     df_joined = df_joined.drop("name", "ssn", "type_of_loan", "credit_history_age", "type_of_loan") # drop identifiers and duplicated columns
-    if type == "training":
-        df_joined = df_joined.join(df_label.select("customer_id"), on="customer_id", how="left_semi") # filter by user IDs that have labels
+
+    df_joined = df_joined.join(df_label.select("customer_id"), on="customer_id", how="left_semi") # filter by user IDs that have labels
  
     # Merge credit history age into one column
     df_joined = df_joined.withColumn("credit_history_age_month", F.col("credit_history_age_year") * 12 + F.col("credit_history_age_month"))
@@ -145,7 +145,7 @@ def build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstre
 ############################
 # Pipeline
 ############################
-def process_gold_table(silver_db, gold_db, partitions_list, spark):
+def process_gold_table(silver_db, gold_db, snapshot_date, spark):
     """
     Wrapper function to build all gold tables
     """
@@ -159,22 +159,22 @@ def process_gold_table(silver_db, gold_db, partitions_list, spark):
     # Build label store
     print("Building label store...")
     df_label = build_label_store(6, 30, df_lms)
-    
+ 
     # Build features
     print("Building features...")
     df_features = build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstream, df_lms, df_label)
 
     # Partition and save features
-    for date_str in tqdm(partitions_list, total=len(partitions_list), desc="Saving features"):
-        partition_name = date_str.replace('-','_') + '.parquet'
-        feature_filepath = os.path.join(gold_db, 'feature_store', partition_name)
-        df_features.filter(col('snapshot_date')==date_str).write.mode('overwrite').parquet(feature_filepath)
+    # for date_str in tqdm.tqdm(partitions_list, total=len(dates_str_lst), desc="Saving features"):
+    partition_name = snapshot_date.replace('-','_') + '.parquet'
+    feature_filepath = os.path.join(gold_db, 'feature_store', partition_name)
+    df_features.filter(col('snapshot_date')==snapshot_date).write.mode('overwrite').parquet(feature_filepath)
 
     # Partition and save labels
-    for date_str in tqdm(partitions_list, total=len(partitions_list), desc="Saving labels"):
-        partition_name = date_str.replace('-','_') + '.parquet'
-        label_filepath = os.path.join(gold_db, 'label_store', partition_name)
-        df_label.filter(col('snapshot_date')==date_str).write.mode('overwrite').parquet(label_filepath)
+    # for date_str in tqdm.tqdm(partitions_list, total=len(dates_str_lst), desc="Saving labels"):
+    partition_name = snapshot_date.replace('-','_') + '.parquet'
+    label_filepath = os.path.join(gold_db, 'label_store', partition_name)
+    df_label.filter(col('snapshot_date')==snapshot_date).write.mode('overwrite').parquet(label_filepath)
 
     return df_features, df_label
 
@@ -187,6 +187,7 @@ def process_gold_label(silver_db, gold_db, date_str, spark):
     # Build label store
     print("Building label store...")
     df_label = build_label_store(6, 30, df_lms)
+
     partition_name = date_str.replace('-','_') + '.parquet'
     label_filepath = os.path.join(gold_db, 'label_store', partition_name)
     df_label.filter(col('snapshot_date')==date_str).write.mode('overwrite').parquet(label_filepath)
@@ -204,38 +205,20 @@ def process_gold_features(silver_db, gold_db, date_str, type, spark):
     df_loan_type = read_silver_table('loan_type', silver_db, spark)
     df_lms = read_silver_table('lms', silver_db, spark)
     
-    # df_label = read_gold_label(gold_db, spark)
 
-    # # Build label store
-    if type == "training":
-        label_path = os.path.join(gold_db, 'label_store')
-        # For training, read existing labels from gold
-        try:
-            df_label = read_gold_label(gold_db, spark)     
-        except Exception as e:
-            print("No existing labels found. Building label store for first time...")
-            df_label = build_label_store(6, 30, df_lms)              
+    label_path = os.path.join(gold_db, 'label_store')
+    df_label = read_gold_label(gold_db, spark)     
 
-            # Save the labels for future use
-            partition_name = date_str.replace('-','_') + '.parquet'
-            label_filepath = os.path.join(gold_db, 'label_store', partition_name)
-            df_label.filter(col('snapshot_date') == date_str).write.mode('overwrite').parquet(label_filepath)
-            print(f"Label store created and saved at: {label_filepath}")
-    else:
-        df_label = None
+    partition_name = date_str.replace('-','_') + '.parquet'
+    label_filepath = os.path.join(gold_db, 'label_store', partition_name)
+    df_label.filter(col('snapshot_date') == date_str).write.mode('overwrite').parquet(label_filepath)
 
     # Build features
     print("Building features...")
-    df_features = build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstream, df_lms, df_label, type)
-
+    df_features = build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstream, df_lms, df_label)
     partition_name = date_str.replace('-','_') + '.parquet'
-
-    # Save feature store
-    if type == "training":
-        feature_filepath = os.path.join(gold_db, "feature_store", partition_name)
-    else:
-        feature_filepath = os.path.join(gold_db, "online_feature_store", partition_name)
-    
+    feature_filepath = os.path.join(gold_db, "feature_store", partition_name)
+ 
     df_features.filter(col('snapshot_date') == date_str).write.mode("overwrite").parquet(feature_filepath)
     print(f"Feature store saved at: {feature_filepath}")
 
