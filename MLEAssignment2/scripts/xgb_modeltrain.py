@@ -14,9 +14,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import make_scorer, roc_auc_score, fbeta_score, confusion_matrix, ConfusionMatrixDisplay
 
-from utils import *
-from config import *
-from utils.helper import *
+# from utils import *
+# from config import *
+# from utils.helper import *
 import numpy as np
 import config as cg
 import pickle
@@ -30,23 +30,37 @@ from dateutil.relativedelta import relativedelta
 import optuna
 import joblib
 import argparse
+from xgboost import XGBClassifier
+
+# def read_gold_table(table, gold_db, type, spark):
+#     """
+#     Helper function to read all partitions of a gold table
+#     """
+#     folder_path = os.path.join(gold_db, table)
+#     files_list = [os.path.join(folder_path, os.path.basename(f)) for f in glob.glob(os.path.join(folder_path, '*'))]
+#     df = spark.read.option("header", "true").parquet(*files_list)
+#     return df
 
 def read_gold_table(table, gold_db, spark):
     """
-    Helper function to read all partitions of a gold table
+    Reads all .parquet files in a gold_db/table directory (non-partitioned).
     """
     folder_path = os.path.join(gold_db, table)
-    files_list = [os.path.join(folder_path, os.path.basename(f)) for f in glob.glob(os.path.join(folder_path, '*'))]
+    files_list = glob.glob(os.path.join(folder_path, '*.parquet'))  # Only pick parquet files
+
+    if not files_list:
+        raise FileNotFoundError(f"No Parquet files found in {folder_path}")
+
     df = spark.read.option("header", "true").parquet(*files_list)
     return df
 
 
-def train_logistic_regression_model(spark, snapshot_date: str, model_name: str, n_trials: int = 100):
+def train_xgb_model(spark, snapshot_date: str, model_name: str, n_trials: int = 100):
     """
     Train Logistic Regression model
     """
     
-    print(f"Training Logistic Regression model for {model_name} on {snapshot_date}")
+    print(f"Training XGBoost model for {model_name} on {snapshot_date}")
     print("=" * 60)
     
     # Your exact data loading logic
@@ -125,41 +139,35 @@ def train_logistic_regression_model(spark, snapshot_date: str, model_name: str, 
 
         print(f"Starting hyperparameter tuning for Logistic Regression...")
         
-        # Logistic Regression hyperparameter tuning with Optuna
+        # XGBoost hyperparameter tuning with Optuna - Minimal version
         def objective(trial):
-            penalty = trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet'])
-            
             params = {
-                'C': trial.suggest_float('C', 1e-4, 1e2, log=True),
-                'penalty': penalty,
-                'max_iter': trial.suggest_int('max_iter', 100, 2000),
+                'n_estimators': trial.suggest_int('n_estimators', 100, 500),
+                'max_depth': trial.suggest_int('max_depth', 3, 8),
+                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.3, log=True),
                 'random_state': 42,
                 'n_jobs': -1
             }
             
-            # Set solver based on penalty
-            if penalty == 'l1':
-                params['solver'] = 'liblinear'
-            elif penalty == 'l2':
-                params['solver'] = trial.suggest_categorical('solver', ['liblinear', 'lbfgs', 'sag', 'saga'])
-            else:  # elasticnet
-                params['solver'] = 'saga'
-                params['l1_ratio'] = trial.suggest_float('l1_ratio', 0, 1)
-            
-            model = LogisticRegression(**params)
+            model = XGBClassifier(**params)
             model.fit(X_train_arr, y_train_arr)
             y_pred = model.predict_proba(X_test_arr)[:, 1]
             return roc_auc_score(y_test_arr, y_pred)
-        
-        # Run Optuna optimization
+
+        # Run the optimization
         study = optuna.create_study(direction='maximize')
-        study.optimize(objective, n_trials=n_trials)
-        
-        # Train best model
-        best_model = LogisticRegression(**study.best_params)
+        study.optimize(objective, n_trials=100)
+
+        # Get best parameters
+        best_params = study.best_params
+        print(f"Best ROC AUC: {study.best_value:.4f}")
+        print(f"Best parameters: {best_params}")
+
+        # Train final model with best parameters
+        best_model = XGBClassifier(**best_params)
         best_model.fit(X_train_arr, y_train_arr)
         
-        print(f"Best parameters for Logistic Regression: {study.best_params}")
+        print(f"Best parameters for XGBoost: {study.best_params}")
         print(f"Best cross-validation AUC: {study.best_value:.4f}")
 
         # Evaluate model on all splits
@@ -186,7 +194,7 @@ def train_logistic_regression_model(spark, snapshot_date: str, model_name: str, 
         best_threshold = thresholds[np.argmax(f1_scores_train)]
         
         # Print results
-        print(f"\nLogistic Regression Model Results:")
+        print(f"\n XGBoost Model Results:")
         print(f"Train AUC: {train_auc:.4f}")
         print(f"Test AUC: {test_auc:.4f}")
         print(f"OOT AUC: {oot_auc:.4f}")
@@ -197,7 +205,7 @@ def train_logistic_regression_model(spark, snapshot_date: str, model_name: str, 
         
         # Save model
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        model_path = f"/opt/airflow.model_bank/{model_name}_{snapshot_date}_{timestamp}.pkl"
+        model_path = f"/opt/airflow/model_bank/{model_name}_{snapshot_date}_{timestamp}.pkl"
         
         model_package = {
             'model': best_model,
@@ -216,11 +224,19 @@ def train_logistic_regression_model(spark, snapshot_date: str, model_name: str, 
             'feature_columns': X_train.drop(columns=['customer_id', 'snapshot_date']).columns.tolist()
         }
         
+        # Need to create directory first if not exists
+        # Save model
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        model_dir = "/opt/airflow/model_bank"  # Directory path
+        model_path = f"{model_dir}/xgb_{model_train_date_str}_{timestamp}.pkl"  # File path
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
         joblib.dump(model_package, model_path)
-        print(f"\nLogistic Regression model saved to: {model_path}")
+        print(f"\nnXGBoost model saved to: {model_path}")
         
         return best_model, model_path, model_package
 
+# Example usage
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -228,13 +244,19 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Initialize Spark
-    spark = set_spark()
+    # spark = set_spark()
+    spark = pyspark.sql.SparkSession.builder \
+    .appName("dev") \
+    .master("local[*]") \
+    .getOrCreate()
+    
+    spark.sparkContext.setLogLevel("ERROR")
     
     # Train Logistic Regression model
-    model, model_path, package = train_logistic_regression_model(
+    model, model_path, package = train_xgb_model(
         spark=spark,
         snapshot_date=args.snapshotdate,
-        model_name="logreg",
+        model_name="xgb",
         n_trials=50
     )
     

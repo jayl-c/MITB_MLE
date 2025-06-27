@@ -1,12 +1,11 @@
 
 import os
 import pyspark
-import shutil
 import pyspark.sql.functions as F
 
 from collections import Counter
 
-from pyspark.sql.functions import col, when
+from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType, MapType
 
 ############################
@@ -83,10 +82,10 @@ def process_df_clickstream(df):
 ############################
 # Financials
 ############################
-from collections import Counter
-from pyspark.sql.types import MapType, StringType, IntegerType
-
 def split_loan_type(loan_type):
+    """
+    Utility function to split loan type into frequency table
+    """
     if not isinstance(loan_type, str):
         return {}
     
@@ -97,6 +96,9 @@ def split_loan_type(loan_type):
     return dict(Counter(cleaned))
 
 def process_df_financials(df, silver_db, snapshot_date_str):
+    """
+    Function to process financials table
+    """
     numeric_regex = r'([-+]?\d*\.?\d+)'
     
     columns = {
@@ -104,7 +106,7 @@ def process_df_financials(df, silver_db, snapshot_date_str):
         'monthly_inhand_salary': FloatType(),
         'num_bank_accounts': IntegerType(),
         'num_credit_card': IntegerType(),
-        'interest_rate': IntegerType(), 
+        'interest_rate': IntegerType(),
         'num_of_loan': IntegerType(),
         'delay_from_due_date': IntegerType(),
         'num_of_delayed_payment': IntegerType(),
@@ -117,35 +119,18 @@ def process_df_financials(df, silver_db, snapshot_date_str):
         'monthly_balance': FloatType()
     }
 
-    # Cast columns to the proper data type with improved null handling
+    # Cast columns to the proper data type
     for col_name, dtype in columns.items():
-        # Extract numeric value
-        extracted = F.regexp_extract(F.col(col_name), numeric_regex, 1)
-        
-        # Handle empty extractions and cast properly
-        if isinstance(dtype, IntegerType):
-            # For integers, ensure we handle nulls and round floats
-            cleaned = F.when((extracted == "") | (extracted.isNull()), None) \
-                      .otherwise(F.round(extracted.cast(FloatType())).cast(IntegerType()))
-        else:
-            # For floats, handle nulls normally
-            cleaned = F.when((extracted == "") | (extracted.isNull()), None) \
-                      .otherwise(extracted.cast(dtype))
-        
-        df = df.withColumn(col_name, cleaned)
+        df = df.withColumn(col_name, F.regexp_extract(col(col_name), numeric_regex, 1))
+        df = df.withColumn(col_name, col(col_name).cast(dtype))
 
-    # Split credit history age with proper null handling
+    # Split credit history age
     df = df.withColumn("credit_history_age_year",
                         F.regexp_extract(col('credit_history_age'), r'(\d+)\s+Year', 1))
-    df = df.withColumn("credit_history_age_year", 
-                       F.when((col("credit_history_age_year") == "") | (col("credit_history_age_year").isNull()), None)
-                       .otherwise(col("credit_history_age_year").cast(IntegerType())))
-    
+    df = df.withColumn("credit_history_age_year", col("credit_history_age_year").cast(IntegerType()))
     df = df.withColumn("credit_history_age_month",
                         F.regexp_extract(col('credit_history_age'), r'(\d+)\s+Month', 1))
-    df = df.withColumn("credit_history_age_month", 
-                       F.when((col("credit_history_age_month") == "") | (col("credit_history_age_month").isNull()), None)
-                       .otherwise(col("credit_history_age_month").cast(IntegerType())))
+    df = df.withColumn("credit_history_age_month", col("credit_history_age_month").cast(IntegerType()))
 
     # Remove negative values from columns that should not have it
     for column_name in ['num_of_loan', 'delay_from_due_date', 'num_of_delayed_payment']:
@@ -155,28 +140,14 @@ def process_df_financials(df, silver_db, snapshot_date_str):
             .otherwise(None)  # redact invalid
         ) 
     
-    # Clip outliers to 97th percentile while preserving data types
-    integer_columns = ['num_bank_accounts', 'num_credit_card', 'num_of_loan', 'num_of_delayed_payment', 'interest_rate']
-    float_columns = ['interest_rate']
-    
-    # Handle integer columns
-    for column_name in integer_columns:
+    # Clip outliers to 90th percentile
+    for column_name in ['num_bank_accounts', 'num_credit_card', 'interest_rate', 'num_of_loan', 'num_of_delayed_payment']:
         percentile_value = df.approxQuantile(column_name, [0.97], 0.01)[0]
         df = df.withColumn(
             column_name,
-            F.when(col(column_name) > percentile_value, F.lit(int(percentile_value)))
+            F.when(col(column_name) > percentile_value, percentile_value)
             .otherwise(col(column_name))
-            .cast(IntegerType())  # Ensure it stays integer
         )
-    
-    # # Handle float columns
-    # for column_name in float_columns:
-    #     percentile_value = df.approxQuantile(column_name, [0.97], 0.01)[0]
-    #     df = df.withColumn(
-    #         column_name,
-    #         F.when(col(column_name) > percentile_value, F.lit(percentile_value))
-    #         .otherwise(col(column_name))
-    #     )
 
     # Split payment behaviour
     payment_behaviour_regex = r'(Low|High)_spent_(Small|Medium|Large)_value'
@@ -208,53 +179,34 @@ def process_df_financials(df, silver_db, snapshot_date_str):
     ######################################
     # Split loan type into its own table
     ######################################
-    df_loan_type = df.select('customer_id', 'snapshot_date', 'Type_of_Loan')
-    
-    # Clean and split the text (handle nulls first)
-    df_loan_type = df_loan_type.withColumn("Type_of_Loan", 
-                                          F.when(col("Type_of_Loan").isNull(), "No loan")
-                                          .otherwise(col("Type_of_Loan")))
+    df_loan_type = df.select('customer_id', 'snapshot_date', 'type_of_loan')
 
-    # Split loan types and clean them
-    df_loan_type = df_loan_type.withColumn("loan_types_array", 
-                                          F.split(F.regexp_replace(col("Type_of_Loan"), " and ", ", "), ","))
+    # Register helper function as a udf
+    split_loan_type_udf = F.udf(split_loan_type, MapType(StringType(), IntegerType()))
 
-    # Clean each element in the array (trim and lowercase with underscores)
-    df_loan_type = df_loan_type.withColumn("loan_types_array", 
-                                          F.transform(col("loan_types_array"), 
-                                                     lambda x: F.lower(F.regexp_replace(F.trim(x), " ", "_"))))
+    # Apply UDF to column
+    df_loan_type = df_loan_type.withColumn("loan_type_counts", split_loan_type_udf(col("Type_of_Loan")))
+    all_keys = (
+        df_loan_type.select("loan_type_counts")
+        .rdd.flatMap(lambda row: row["loan_type_counts"].keys() if row["loan_type_counts"] else [])
+        .distinct()
+        .collect()
+    )
 
-    # Remove empty strings from the arrays
-    df_loan_type = df_loan_type.withColumn("loan_types_array", 
-                                          F.filter(col("loan_types_array"), 
-                                                  lambda x: (x != "") & (x.isNotNull())))
+    # Create individual columns for each loan type
+    for key in all_keys:
+        df_loan_type = df_loan_type.withColumn(
+            key,
+            F.coalesce(col("loan_type_counts").getItem(key), F.lit(0))
+        )
 
-    # Handle edge case: arrays that become empty after filtering
-    df_loan_type = df_loan_type.withColumn("loan_types_array",
-                                          F.when(F.size(col("loan_types_array")) == 0, 
-                                                F.array(F.lit("no_loan")))
-                                          .otherwise(col("loan_types_array")))
-
-    # Get all unique loan types without using RDD
-    loan_types = df_loan_type.select(F.explode("loan_types_array").alias("loan_type")).distinct().collect()
-    unique_loan_types = [row['loan_type'] for row in loan_types]
-
-    # Create count columns for each loan type (to match original UDF behavior)
-    for loan_type in unique_loan_types:
-        # Count occurrences of each loan type in the array
-        df_loan_type = df_loan_type.withColumn(loan_type, 
-                                              F.size(F.filter(col("loan_types_array"), 
-                                                            lambda x: x == loan_type)))
-
-    # Drop intermediate columns
-    df_loan_type = df_loan_type.drop("loan_types_array")
+    # Drop intermedate columns
+    df_loan_type = df_loan_type.drop("loan_type_counts")
     
     # Save new table
     partition_name = snapshot_date_str.replace('-','_') + '.parquet'
     filepath = os.path.join(silver_db, 'loan_type', partition_name)
     df_loan_type.write.mode("overwrite").parquet(filepath)
-
-    # return df_loan_type.dtypes
 
     return df.drop('payment_behaviour', 'type_of_loan')
 
@@ -298,15 +250,14 @@ def process_df_lms(df):
 ############################
 def process_silver_table(table_name, bronze_db, silver_db, snapshot_date_str, spark):
     """
-    Wrapper function to build silver table, saving based on processing type (training/inference)
+    Wrapper function to build silver table
     """
-
     # connect to bronze table
-    partition_name = snapshot_date_str.replace('-', '_') + '.csv'
+    partition_name = snapshot_date_str.replace('-','_') + '.csv'
     filepath = os.path.join(bronze_db, table_name, partition_name)
     df = spark.read.csv(filepath, header=True, inferSchema=True)
 
-    # Change all column names to lowercase
+    # Change all column names to be lowercase
     df = df.toDF(*[col_name.lower() for col_name in df.columns])
 
     if table_name == "attributes":
@@ -320,14 +271,8 @@ def process_silver_table(table_name, bronze_db, silver_db, snapshot_date_str, sp
     else:
         raise ValueError("Table does not exist!")
 
-    # Set output path based on type
-    output_dir = os.path.join(silver_db, table_name)
-    os.makedirs(output_dir, exist_ok=True)
-
     # Save silver table
-    partition_name = snapshot_date_str.replace('-', '_') + '.parquet'
-    filepath = os.path.join(output_dir, partition_name)
+    partition_name = snapshot_date_str.replace('-','_') + '.parquet'
+    filepath = os.path.join(silver_db, table_name, partition_name)
     df.write.mode("overwrite").parquet(filepath)
-
     return df
-

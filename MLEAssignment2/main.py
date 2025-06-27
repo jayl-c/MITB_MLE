@@ -45,6 +45,7 @@ if __name__ == "__main__":
     spark.sparkContext.setLogLevel("ERROR")
 
     # Generate partitions
+   
     start_date_str = "2023-01-01"
     end_date_str = "2024-12-01"
 

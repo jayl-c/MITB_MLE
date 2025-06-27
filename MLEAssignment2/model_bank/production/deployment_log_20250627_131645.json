@@ -1,0 +1,9 @@
+{
+  "timestamp": "2025-06-27T13:16:45.273854",
+  "winner": "XGBoost",
+  "metric": "oot_f1",
+  "winner_score": 0.8077669902912621,
+  "xgb_score": 0.8077669902912621,
+  "logreg_score": 0.762019758507135,
+  "production_path": "./model_bank/production/best_model_20250627_131645.pkl"
+}

@@ -23,6 +23,13 @@ def set_spark():
 
     return spark
 
+def prepare_spark_features(df, feature_cols, feature_col_name="features"):
+    """
+    Convert feature columns to a single vector column for Spark ML
+    """
+    assembler = VectorAssembler(inputCols=feature_cols, outputCol=feature_col_name)
+    return assembler.transform(df)
+
 def generate_first_of_month_dates(start_date_str, end_date_str):
     """
     Generate list of dates to process
@@ -281,54 +288,6 @@ def get_gold_file_if_exist(start_date, end_date, spark, data_root_path="/opt/air
         data_root_path=data_root_path
     )
 
-# Airflow DAG usage example
-def load_gold_data_task(snapshot_date, **context):
-    """
-    Airflow task function to load gold data.
-    
-    Args:
-        snapshot_date: Snapshot date string (YYYY-MM-DD)
-        **context: Airflow context
-        
-    Returns:
-        dict: Information about loaded data
-    """
-    
-    # Get Spark session
-    spark = context.get('spark') or SparkSession.builder.appName("LoadGoldData").getOrCreate()
-    
-    # Parse dates
-    snapshot_dt = datetime.strptime(snapshot_date, "%Y-%m-%d")
-    start_date = snapshot_dt - relativedelta(months=2)
-    end_date = snapshot_dt
-    
-    # Load data
-    feature_df, label_df = get_gold_file_if_exist(start_date, end_date, spark)
-    
-    # Prepare results
-    result = {
-        'snapshot_date': snapshot_date,
-        'start_date': start_date.strftime('%Y-%m-%d'),
-        'end_date': end_date.strftime('%Y-%m-%d'),
-        'features_loaded': feature_df is not None,
-        'labels_loaded': label_df is not None,
-        'feature_count': feature_df.count() if feature_df else 0,
-        'label_count': label_df.count() if label_df else 0
-    }
-    
-    if feature_df and label_df:
-        print(f"Successfully loaded data: {result['feature_count']} features, {result['label_count']} labels")
-        
-        # Store DataFrames in Airflow context for downstream tasks
-        context['task_instance'].xcom_push(key='feature_df_count', value=result['feature_count'])
-        context['task_instance'].xcom_push(key='label_df_count', value=result['label_count'])
-
-        
-    else:
-        print("Failed to load required data")
-        raise ValueError("Could not load both features and labels")
-    
-    return result
 
 def generate_config(snapshot_date: str, model_name: str, cg: object) -> dict:
     config = {}
@@ -364,42 +323,3 @@ def validate_bad_rate(y_train, y_test, y_oot) -> bool:
         print("WARNING: Bad rates differ significantly between splits.")
         return False
     return True
-
-def prepare_numpy_arrays(X_df, y_df, scaler=None):
-    features = X_df.drop(columns=["customer_id", "snapshot_date"])
-    if scaler is None:
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(features)
-    else:
-        X_scaled = scaler.transform(features)
-    y_array = y_df["label"].values
-    return X_scaled, y_array, scaler
-
-def evaluate_model(model, X_sets, y_sets, beta=1.5):
-    thresholds = np.arange(0.01, 1.0, 0.01)
-    y_pred_probas = [model.predict_proba(X)[:, 1] for X in X_sets]
-    aucs = [roc_auc_score(y, y_pred) for y, y_pred in zip(y_sets, y_pred_probas)]
-
-    fbetas = [
-        [fbeta_score(y, (y_pred > t).astype(int), beta=beta, zero_division=0) for t in thresholds]
-        for y, y_pred in zip(y_sets, y_pred_probas)
-    ]
-    best_threshold = thresholds[np.argmax(fbetas[0])]
-
-    return aucs, fbetas, best_threshold
-
-
-def save_model_package(model, scaler, config, study_params, eval_metrics, feature_columns, model_name, snapshot_date):
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    model_path = f"models/xgboost_{model_name}_{snapshot_date}_{timestamp}.pkl"
-
-    package = {
-        'model': model,
-        'scaler': scaler,
-        'best_params': study_params,
-        'performance': eval_metrics,
-        'config': config,
-        'feature_columns': feature_columns
-    }
-    joblib.dump(package, model_path)
-    return model_path, package

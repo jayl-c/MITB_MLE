@@ -56,7 +56,7 @@ def bronze_attributes(snapshotdate, spark: SparkSession):
     print('\n\n---completed job---\n\n')
 
 
-def bronze_financials(snapshotdate, type, spark: SparkSession):
+def bronze_financials(snapshotdate, spark: SparkSession):
     print('\n\n---starting job---\n\n')
 
     bronze_directory = "/opt/airflow/datamart/bronze"
@@ -112,7 +112,7 @@ def silver_financials(snapshotdate, spark: SparkSession):
     print('\n\n---completed job---\n\n')
 
 
-def gold_features(snapshotdate, type, spark: SparkSession):
+def gold_features(snapshotdate, spark: SparkSession):
     print('\n\n---starting job---\n\n')
 
     silver_db = "/opt/airflow/datamart/silver"
@@ -131,8 +131,7 @@ if __name__ == "__main__":
     # Setup argparse to parse command-line arguments
     parser = argparse.ArgumentParser(description="run job")
     parser.add_argument("--snapshotdate", type=str, required=True, help="YYYY-MM-DD")
-    # parser.add_argument("--task", type=str, required=True, help="Which task to run")
-    parser.add_argument("--type", type=str, required=True, help="training or inference")
+    parser.add_argument("--task", type=str, required=True, help="Which task to run")
     args = parser.parse_args()
 
     TASK_REGISTRY = {

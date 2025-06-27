@@ -16,7 +16,7 @@ def read_silver_table(table, silver_db, spark):
     """
     folder_path = os.path.join(silver_db, table)
     files_list = [os.path.join(folder_path, os.path.basename(f)) for f in glob.glob(os.path.join(folder_path, '*'))]
-    print(folder_path)
+   
     # Read the table
     df = spark.read.option("header", "true").parquet(*files_list)
     
@@ -161,7 +161,7 @@ def build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstre
 ############################
 # Pipeline
 ############################
-def process_gold_table(silver_db, gold_db, snapshot_date, spark):
+def process_gold_table(silver_db, gold_db, partitions_list, spark):
     """
     Wrapper function to build all gold tables
     """
@@ -180,19 +180,17 @@ def process_gold_table(silver_db, gold_db, snapshot_date, spark):
     print("Building features...")
     df_features = build_feature_store(df_attributes, df_financials, df_loan_type, df_clickstream, df_lms, df_label)
 
-    partition_name = snapshot_date
-
     # Partition and save features
-    # for date_str in tqdm.tqdm(partitions_list, total=len(dates_str_lst), desc="Saving features"):
-    partition_name = snapshot_date.replace('-','_') + '.parquet'
-    feature_filepath = os.path.join(gold_db, 'feature_store', partition_name)
-    df_features.filter(col('snapshot_date')==snapshot_date).write.mode('overwrite').parquet(feature_filepath)
+    for date_str in tqdm(partitions_list, total=len(partitions_list), desc="Saving features"):
+        partition_name = date_str.replace('-','_') + '.parquet'
+        feature_filepath = os.path.join(gold_db, 'feature_store', partition_name)
+        df_features.filter(col('snapshot_date')==date_str).write.mode('overwrite').parquet(feature_filepath)
 
     # Partition and save labels
-    # for date_str in tqdm.tqdm(partitions_list, total=len(dates_str_lst), desc="Saving labels"):
-    partition_name = snapshot_date.replace('-','_') + '.parquet'
-    label_filepath = os.path.join(gold_db, 'label_store', partition_name)
-    df_label.filter(col('snapshot_date')==snapshot_date).write.mode('overwrite').parquet(label_filepath)
+    for date_str in tqdm(partitions_list, total=len(partitions_list), desc="Saving labels"):
+        partition_name = date_str.replace('-','_') + '.parquet'
+        label_filepath = os.path.join(gold_db, 'label_store', partition_name)
+        df_label.filter(col('snapshot_date')==date_str).write.mode('overwrite').parquet(label_filepath)
 
     return df_features, df_label
 

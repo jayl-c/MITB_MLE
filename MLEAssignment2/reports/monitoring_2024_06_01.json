@@ -1,0 +1,22 @@
+{
+  "snapshot_date": "2024-06-01",
+  "timestamp": "2025-06-27T14:07:07.524873",
+  "consistency": {
+    "model_types": [
+      "xgb"
+    ],
+    "model_versions": [
+      "xgb_20250627"
+    ],
+    "model_thresholds": [
+      0.37
+    ],
+    "model_consistent": true,
+    "total_predictions": 996,
+    "avg_probability": 0.2667,
+    "default_rate": 0.2731
+  },
+  "drift": {
+    "error": "No reference predictions found"
+  }
+}
