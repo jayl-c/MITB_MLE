@@ -226,7 +226,7 @@ def process_gold_features(silver_db, gold_db, date_str, spark):
     
     df_label = build_label_store(6, 30, df_lms)
 
-    df_label = df_label.withColumn("snapshot_date", F.col("snapshot_date").cast("string"))
+    df_label = df_label.withColumn("snapshot_date", F.col("snapshot_date").cast(DateType()))
 
     partition_name = date_str.replace('-', '_') + '.parquet'
     label_filepath = os.path.join(gold_db, 'label_store', partition_name)
@@ -243,7 +243,7 @@ def process_gold_features(silver_db, gold_db, date_str, spark):
         df_clickstream, df_lms, df_label
     )
 
-    df_features = df_features.withColumn("snapshot_date", F.col("snapshot_date").cast("string"))
+    df_features = df_features.withColumn("snapshot_date", F.col("snapshot_date").cast(DateType()))
 
     feature_filepath = os.path.join(gold_db, "feature_store", partition_name)
 

@@ -2,7 +2,7 @@ import joblib
 import os
 import glob
 import pandas as pd
-import openpyxl
+# import openpyxl
 from datetime import datetime
 
 def get_latest_model(model_type, model_bank_path="model_bank/"):
@@ -24,7 +24,6 @@ def get_latest_model(model_type, model_bank_path="model_bank/"):
 
 def generate_model_report():
     """Generate a comprehensive model comparison report"""
-    
     # Load latest models
     xgb_package, xgb_path = get_latest_model("xgb")
     logreg_package, logreg_path = get_latest_model("logreg")

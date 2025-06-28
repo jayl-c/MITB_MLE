@@ -12,51 +12,32 @@ default_args = {
 }
 
 with DAG(
-    'train_pipeline',
+    'inference_pipeline',
     default_args=default_args,
     description='data pipeline run once a month',
     schedule='0 0 1 * *',  # At 00:00 on day-of-month 1: when you want to run (translate to cron)
-    start_date=datetime(2024, 8, 1),
-    end_date=datetime(2024, 10, 1),
+    start_date=datetime(2024, 11, 1), # Eg. we make inference on this day
+    end_date=datetime(2024, 12, 1),
     catchup=True,
 
 ) as dag:
 
-
-    train_xgb_model = BashOperator(
-        task_id='training_model_xgb',
+    inference_task = BashOperator(
+        task_id='make_inference',
         bash_command =(
             'cd /opt/airflow/scripts && '
-            'python3 xgb_modeltrain.py '
+            'python3 model_inference.py '
             '--snapshotdate "{{ ds }}"'
         ) 
     )
 
-    train_lg_model = BashOperator(
-        task_id='training_model_lg',
-        bash_command =(
-            'cd /opt/airflow/scripts && '
-            'python3 logreg_modeltrain.py '
-            '--snapshot_date "{{ ds }}"'
-        ) 
-    )
-
-    generate_report = BashOperator(
-        task_id='generate_model_training_report',
-        bash_command =(
-            'cd /opt/airflow/scripts && '
-            'python3 model_check.py '
-        ) 
-    )
-
-    deploy_model = BashOperator(
-        task_id='deploy_best_model',
+    inference_report = BashOperator(
+        task_id='generate_report',
         bash_command =(
             'cd /opt/airflow/scripts && '
             'python3 model_monitor.py '
             '--snapshotdate "{{ ds }}"'
-        )
+        ) 
     )
 
-
-    [train_xgb_model, train_lg_model] >> deploy_model 
+inference_task >> inference_report

@@ -21,7 +21,7 @@ with DAG(
     default_args=default_args,
     description='data pipeline run once a month',
     schedule='0 0 1 * *',  # At 00:00 on day-of-month 1: when you want to run (translate to cron)
-    start_date=datetime(2022, 1, 1),
+    start_date=datetime(2023, 1, 1),
     end_date=datetime(2024, 12, 1),
     catchup=True,
 

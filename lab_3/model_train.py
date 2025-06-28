@@ -58,7 +58,6 @@ def main(snapshotdate):
     config["train_test_ratio"] = train_test_ratio 
     pprint.pprint(config)
 
-
     
     # --- get label ---
     # connect to label store

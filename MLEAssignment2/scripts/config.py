@@ -23,6 +23,6 @@ PREDICTORS = ['annual_income',
 PATH_DIR_DATA = ""
 PATH_DIR_REPORT = "/opt/airflow/report"
 
-train_test_period_months = 12
+train_test_period_months = 6
 oot_period_months = 2
-train_test_ratio = 0.2
+train_test_ratio = 0.3
