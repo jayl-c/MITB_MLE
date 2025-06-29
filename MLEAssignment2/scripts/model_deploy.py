@@ -5,7 +5,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-mlflow.set_tracking_uri("http://mlflow:5000/")
+# mlflow.set_tracking_uri("http://mlflow:5000/")
 
 model_name = "Loan-default-prod"
 client = MlflowClient(tracking_uri="http://mlflow:5000/")
@@ -36,8 +36,9 @@ def get_latest_model_by_type(experiment_name, model_type, metric):
 
 
 def compare_and_promote_best_model():
+
     experiment_name = "Loan-default-model"
-    metric = "oot_auc"  # Use OOT AUC for comparison
+    metric = "oot_auc"  
 
     logreg_run, logreg_score = get_latest_model_by_type(experiment_name, "LogisticRegression", metric)
     xgb_run, xgb_score = get_latest_model_by_type(experiment_name, "XGBClassifier", metric)

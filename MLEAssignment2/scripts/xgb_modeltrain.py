@@ -29,8 +29,6 @@ import json
 import numpy as np
 import logging
 
-
-
 def read_gold_table(table, gold_db, spark):
     """
     Helper function to read all partitions of a gold table
@@ -277,12 +275,15 @@ def xgb_train(snapshot_date,spark:SparkSession):
             os.makedirs(reports_dir, exist_ok=True)
             
             fbeta_json_filename = os.path.join(reports_dir, f"fbeta_scores_{snapshot_date}.json")
+
             with open(fbeta_json_filename, 'w') as f:
                 json.dump(fbeta_data, f, indent=2)
             mlflow.log_artifact(fbeta_json_filename, artifact_path="model")
+        
             with open("best_threshold.txt", "w") as f:
                 f.write(str(best_threshold))
             mlflow.log_artifact("best_threshold.txt", artifact_path="model")
+        
             with open("feature_columns.pkl", "wb") as f:
                 pickle.dump(feature_columns, f)
             mlflow.log_artifact("feature_columns.pkl", artifact_path="model")

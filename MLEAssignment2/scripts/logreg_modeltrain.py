@@ -45,8 +45,8 @@ client = MlflowClient("http://mlflow:5000/")
 
 def logreg_train(snapshot_date,spark:SparkSession):
 
-    X_spark = read_gold_table('feature_store', '/opt/airflow/datamart/gold', spark)
-    y_spark = read_gold_table('label_store', '/opt/airflow/datamart/gold', spark)
+    X_spark = read_gold_table('feature_store', 'datamart/gold', spark)
+    y_spark = read_gold_table('label_store', 'datamart/gold', spark)
     X_df = X_spark.toPandas().sort_values(by='customer_id')
     y_df = y_spark.toPandas().sort_values(by='customer_id')
 
@@ -302,7 +302,7 @@ def logreg_train(snapshot_date,spark:SparkSession):
             with open(fbeta_json_filename, 'w') as f:
                 json.dump(fbeta_data, f, indent=2)
             mlflow.log_artifact(fbeta_json_filename)
-            
+
             with open("scaler.pkl", "wb") as f:
                 pickle.dump(scaler, f)
             mlflow.log_artifact("scaler.pkl", artifact_path="model")
@@ -320,7 +320,6 @@ def logreg_train(snapshot_date,spark:SparkSession):
     registered_model_name='Loan-default-prod',
     signature=signature
 )
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
