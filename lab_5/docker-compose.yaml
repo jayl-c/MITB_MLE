@@ -37,7 +37,7 @@ services:
       - airflow-init
     environment:
       - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
-      - AIRFLOW__CORE__FERNET_KEY=PAqBeGJLJTYFzVkOGHWIYXdLO7XdXz5yTdxAGJe9ezM=
+      - AIRFLOW__CORE__FERNET_KEY=""
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__AUTH_MANAGER=airflow.auth.managers.fab.fab_auth_manager.FabAuthManager
     volumes:
